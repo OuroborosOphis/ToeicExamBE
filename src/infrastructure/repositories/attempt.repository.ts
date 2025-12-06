@@ -4,6 +4,7 @@ import { Attempt } from '../../domain/entities/attempt.entity';
 import { AttemptAnswer } from '../../domain/entities/attempt-answer.entity';
 import { Choice } from '../../domain/entities/choice.entity';
 import { Question } from '../../domain/entities/question.entity';
+import { MediaQuestion } from '../../domain/entities/media-question.entity';
 
 /**
  * AttemptRepository handles all database operations for test attempts
@@ -198,6 +199,7 @@ export class AttemptRepository {
       return await manager.findOne(Attempt, {
         where: { ID: attemptId },
         relations: [
+          'exam',
           'attemptAnswers',
           'attemptAnswers.question',
           'attemptAnswers.question.mediaQuestion',
