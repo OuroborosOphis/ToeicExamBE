@@ -185,6 +185,92 @@ router.delete(
 );
 
 /**
+ * POST /api/exam/exams/:id/duplicate
+ * 
+ * Duplicate an exam with all its questions
+ * 
+ * Path params:
+ *   - id: Exam ID to duplicate
+ * 
+ * Requires: Authentication, Teacher or Admin role
+ * Creates a copy owned by the requesting user
+ */
+router.post(
+  '/:id/duplicate',
+  authMiddleware,
+  requireTeacherOrAdmin,
+  examController.duplicate
+);
+
+// ============================================================
+// MEDIA GROUP MANAGEMENT (NEW)
+// ============================================================
+
+/**
+ * POST /api/exam/exams/:examId/media-groups
+ * Add media group (multiple questions) to exam
+ * 
+ * Request body: { mediaGroupId: number, orderIndex: number }
+ */
+router.post(
+  '/:examId/media-groups',
+  authMiddleware,
+  requireTeacherOrAdmin,
+  examController.addMediaGroup
+);
+
+/**
+ * DELETE /api/exam/exams/:examId/media-groups/:mediaGroupId
+ * Remove entire media group from exam
+ */
+router.delete(
+  '/:examId/media-groups/:mediaGroupId',
+  authMiddleware,
+  requireTeacherOrAdmin,
+  examController.removeMediaGroup
+);
+
+/**
+ * PUT /api/exam/exams/:examId/media-groups/:mediaGroupId/position
+ * Move media group to different position
+ * 
+ * Request body: { newOrderIndex: number }
+ */
+router.put(
+  '/:examId/media-groups/:mediaGroupId/position',
+  authMiddleware,
+  requireTeacherOrAdmin,
+  examController.moveMediaGroup
+);
+
+/**
+ * GET /api/exam/exams/:examId/content-organized
+ * Get exam content organized by media groups
+ * 
+ * Returns: { mediaGroups: [...], standaloneQuestions: [...] }
+ */
+router.get(
+  '/:examId/content-organized',
+  authMiddleware,
+  examController.getOrganizedContent
+);
+
+/**
+ * GET /api/exam/exams/:examId/media-groups-summary
+ * Get summary of media groups structure
+ */
+router.get(
+  '/:examId/media-groups-summary',
+  authMiddleware,
+  requireTeacherOrAdmin,
+  examController.getMediaGroupSummary
+);
+
+// ============================================================
+// UTILITIES & STATISTICS
+// ============================================================
+
+/**
  * GET /api/exam/exams/:id/statistics
  * 
  * Get comprehensive statistics about an exam
@@ -203,21 +289,36 @@ router.get(
 );
 
 /**
- * POST /api/exam/exams/:id/duplicate
- * 
- * Duplicate an exam with all its questions
- * 
- * Path params:
- *   - id: Exam ID to duplicate
- * 
- * Requires: Authentication, Teacher or Admin role
- * Creates a copy owned by the requesting user
+ * POST /api/exam/exams/:examId/validate-structure
+ * Validate exam structure (check for issues)
  */
 router.post(
-  '/:id/duplicate',
+  '/:examId/validate-structure',
   authMiddleware,
   requireTeacherOrAdmin,
-  examController.duplicate
+  examController.validateStructure
+);
+
+/**
+ * POST /api/exam/exams/:examId/compact-order
+ * Auto-fix OrderIndex gaps
+ */
+router.post(
+  '/:examId/compact-order',
+  authMiddleware,
+  requireTeacherOrAdmin,
+  examController.compactOrder
+);
+
+/**
+ * GET /api/exam/exams/:examId/next-order-index
+ * Get next available OrderIndex
+ */
+router.get(
+  '/:examId/next-order-index',
+  authMiddleware,
+  requireTeacherOrAdmin,
+  examController.getNextOrderIndex
 );
 
 export default router;

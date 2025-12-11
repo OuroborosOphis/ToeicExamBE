@@ -86,4 +86,8 @@ export class Question {
    */
   @OneToMany(() => AttemptAnswer, (attemptAnswer) => attemptAnswer.question)
   attemptAnswers: AttemptAnswer[];
+
+  // Thêm vào Question entity
+  @Column({ type: 'int', default: 1 })
+  OrderInGroup: number; // Thứ tự câu hỏi trong nhóm (1, 2, 3...)
 }

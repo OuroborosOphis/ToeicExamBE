@@ -67,4 +67,11 @@ export class ExamQuestion {
   })
   @JoinColumn({ name: 'QuestionID' })
   question: Question;
+
+  // Thêm vào ExamQuestion entity
+  @Column({ type: 'int', nullable: true })
+  MediaQuestionID: number; // Track media group này thuộc về
+
+  @Column({ type: 'boolean', default: false })
+  IsGrouped: boolean; // Flag để biết question này thuộc group hay đứng độc lập
 }

@@ -81,4 +81,25 @@ export class MediaQuestion {
    */
   @OneToMany(() => Question, (question) => question.mediaQuestion)
   questions: Question[];
+
+  // Thêm vào MediaQuestion entity
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  GroupTitle: string; // Tiêu đề cho nhóm câu hỏi
+
+  @Column({ type: 'text', nullable: true })
+  GroupDescription: string; // Mô tả về nhóm
+
+  @Column({ 
+    type: 'enum', 
+    enum: ['EASY', 'MEDIUM', 'HARD'],
+    default: 'MEDIUM',
+    nullable: true 
+  })
+  Difficulty: string; // Độ khó ước lượng
+
+  @Column({ type: 'json', nullable: true })
+  Tags: string[]; // Tags để phân loại và tìm kiếm
+
+  @Column({ type: 'int', default: 0 })
+  OrderIndex: number; // Thứ tự trong part
 }

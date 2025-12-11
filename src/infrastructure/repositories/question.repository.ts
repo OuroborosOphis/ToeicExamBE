@@ -372,4 +372,412 @@ export class QuestionRepository {
 
     return await queryBuilder.getMany();
   }
+
+  /**
+   * Tìm tất cả questions thuộc một media question
+   * 
+   * Đây là method core để lấy tất cả questions trong một "group".
+   * Ví dụ: Lấy 3 câu hỏi của cùng một đoạn văn Part 7.
+   * 
+   * Questions được sort theo OrderInGroup để maintain thứ tự đúng.
+   * 
+   * @param mediaQuestionId - ID của media question
+   * @param options - Additional options
+   * @returns Array of questions sorted by order
+   */
+  async findByMediaQuestionId(
+    mediaQuestionId: number,
+    options?: {
+      sortByOrder?: boolean;
+      includeChoices?: boolean;
+    }
+  ): Promise<Question[]> {
+    const queryBuilder = this.repository
+      .createQueryBuilder('question')
+      .where('question.MediaQuestionID = :mediaId', { 
+        mediaId: mediaQuestionId 
+      });
+
+    // Optionally load choices
+    if (options?.includeChoices !== false) {
+      queryBuilder.leftJoinAndSelect('question.choices', 'choices');
+    }
+
+    // Load media question thông tin
+    queryBuilder.leftJoinAndSelect('question.mediaQuestion', 'media');
+
+    // Sort by OrderInGroup nếu cần
+    if (options?.sortByOrder !== false) {
+      queryBuilder.orderBy('question.OrderInGroup', 'ASC');
+    }
+
+    return await queryBuilder.getMany();
+  }
+
+  /**
+   * Đếm số lượng questions của một media
+   * 
+   * Nhanh hơn findByMediaQuestionId khi chỉ cần count
+   * 
+   * @param mediaQuestionId - Media question ID
+   * @returns Number of questions
+   */
+  async countByMediaQuestionId(mediaQuestionId: number): Promise<number> {
+    return await this.repository.count({
+      where: { MediaQuestionID: mediaQuestionId },
+    });
+  }
+
+  /**
+   * Lấy question đầu tiên của một media group
+   * 
+   * Useful để hiển thị preview của group trên UI.
+   * Ví dụ: Show câu hỏi đầu tiên để giáo viên có ý tưởng
+   * về nội dung của group.
+   * 
+   * @param mediaQuestionId - Media question ID
+   * @returns First question hoặc null
+   */
+  async findFirstByMediaQuestionId(
+    mediaQuestionId: number
+  ): Promise<Question | null> {
+    return await this.repository
+      .createQueryBuilder('question')
+      .where('question.MediaQuestionID = :mediaId', { 
+        mediaId: mediaQuestionId 
+      })
+      .leftJoinAndSelect('question.choices', 'choices')
+      .orderBy('question.OrderInGroup', 'ASC')
+      .limit(1)
+      .getOne();
+  }
+
+  /**
+   * Tạo nhiều questions cùng lúc cho một media group
+   * 
+   * Khi giáo viên tạo một media group mới với nhiều questions,
+   * method này cho phép tạo tất cả questions trong một transaction.
+   * 
+   * Ví dụ: Tạo Part 7 passage với 3 câu hỏi cùng lúc
+   * 
+   * @param mediaQuestionId - ID của media chung
+   * @param questionsData - Array of question data
+   * @param userId - ID của user tạo
+   * @returns Array of created questions
+   */
+  async createMultipleForMedia(
+    mediaQuestionId: number,
+    questionsData: Array<{
+      QuestionText?: string;
+      OrderInGroup: number;
+      Choices: Array<{
+        Content: string;
+        Attribute: string;
+        IsCorrect: boolean;
+      }>;
+    }>,
+    userId: number
+  ): Promise<Question[]> {
+    return await AppDataSource.transaction(async (manager) => {
+      const createdQuestions: Question[] = [];
+
+      // Tạo từng question với choices
+      for (const qData of questionsData) {
+        // Create question
+        const question = manager.create(Question, {
+          QuestionText: qData.QuestionText,
+          MediaQuestionID: mediaQuestionId,
+          OrderInGroup: qData.OrderInGroup,
+          UserID: userId,
+        });
+        const savedQuestion = await manager.save(question);
+
+        // Create choices cho question này
+        const choices = qData.Choices.map(cData =>
+          manager.create(Choice, {
+            QuestionID: savedQuestion.ID,
+            Content: cData.Content,
+            Attribute: cData.Attribute,
+            IsCorrect: cData.IsCorrect,
+          })
+        );
+        await manager.save(choices);
+
+        // Load lại question với choices để return
+        const completeQuestion = await manager.findOne(Question, {
+          where: { ID: savedQuestion.ID },
+          relations: ['choices', 'mediaQuestion'],
+        });
+
+        if (completeQuestion) {
+          createdQuestions.push(completeQuestion);
+        }
+      }
+
+      return createdQuestions;
+    });
+  }
+
+  /**
+   * Update OrderInGroup của một question
+   * 
+   * Khi giáo viên muốn reorder questions trong một group,
+   * method này cho phép update thứ tự.
+   * 
+   * @param questionId - Question ID
+   * @param newOrder - New OrderInGroup value
+   * @returns Updated question
+   */
+  async updateOrderInGroup(
+    questionId: number,
+    newOrder: number
+  ): Promise<Question | null> {
+    const question = await this.repository.findOne({
+      where: { ID: questionId },
+    });
+
+    if (!question) {
+      return null;
+    }
+
+    question.OrderInGroup = newOrder;
+    return await this.repository.save(question);
+  }
+
+  /**
+   * Bulk update OrderInGroup cho nhiều questions
+   * 
+   * Khi reorder toàn bộ group, method này update nhiều
+   * questions cùng lúc một cách efficient.
+   * 
+   * @param updates - Array of { questionId, orderInGroup }
+   * @returns Number of updated questions
+   */
+  async bulkUpdateOrderInGroup(
+    updates: Array<{ questionId: number; orderInGroup: number }>
+  ): Promise<number> {
+    let updatedCount = 0;
+
+    await this.repository.manager.transaction(async (manager) => {
+      for (const update of updates) {
+        const result = await manager.update(
+          Question,
+          { ID: update.questionId },
+          { OrderInGroup: update.orderInGroup }
+        );
+        updatedCount += result.affected || 0;
+      }
+    });
+
+    return updatedCount;
+  }
+
+  /**
+   * Get next available OrderInGroup cho một media
+   * 
+   * Khi thêm question mới vào một existing media group,
+   * method này tìm OrderInGroup tiếp theo có thể dùng.
+   * 
+   * @param mediaQuestionId - Media question ID
+   * @returns Next available order number
+   */
+  async getNextOrderInGroup(mediaQuestionId: number): Promise<number> {
+    const result = await this.repository
+      .createQueryBuilder('question')
+      .where('question.MediaQuestionID = :mediaId', { 
+        mediaId: mediaQuestionId 
+      })
+      .select('MAX(question.OrderInGroup)', 'maxOrder')
+      .getRawOne();
+
+    const maxOrder = result?.maxOrder || 0;
+    return maxOrder + 1;
+  }
+
+  /**
+   * Clone/duplicate questions từ một media sang media khác
+   * 
+   * Khi giáo viên clone một media group, questions cũng
+   * cần được clone. Method này copy tất cả questions và choices.
+   * 
+   * @param sourceMediaId - Source media question ID
+   * @param targetMediaId - Target media question ID
+   * @param userId - User ID tạo clone
+   * @returns Array of cloned questions
+   */
+  async cloneQuestionsToMedia(
+    sourceMediaId: number,
+    targetMediaId: number,
+    userId: number
+  ): Promise<Question[]> {
+    // Get original questions
+    const originalQuestions = await this.findByMediaQuestionId(sourceMediaId, {
+      includeChoices: true,
+    });
+
+    if (originalQuestions.length === 0) {
+      return [];
+    }
+
+    // Clone each question
+    return await AppDataSource.transaction(async (manager) => {
+      const clonedQuestions: Question[] = [];
+
+      for (const original of originalQuestions) {
+        // Create new question
+        const newQuestion = manager.create(Question, {
+          QuestionText: original.QuestionText,
+          MediaQuestionID: targetMediaId,
+          OrderInGroup: original.OrderInGroup,
+          UserID: userId,
+        });
+        const savedQuestion = await manager.save(newQuestion);
+
+        // Clone choices
+        const newChoices = original.choices.map(choice =>
+          manager.create(Choice, {
+            QuestionID: savedQuestion.ID,
+            Content: choice.Content,
+            Attribute: choice.Attribute,
+            IsCorrect: choice.IsCorrect,
+          })
+        );
+        await manager.save(newChoices);
+
+        // Load complete question
+        const complete = await manager.findOne(Question, {
+          where: { ID: savedQuestion.ID },
+          relations: ['choices', 'mediaQuestion'],
+        });
+
+        if (complete) {
+          clonedQuestions.push(complete);
+        }
+      }
+
+      return clonedQuestions;
+    });
+  }
+
+  /**
+   * Delete tất cả questions của một media
+   * 
+   * Khi xóa một media group, cần xóa tất cả questions liên quan.
+   * Method này thực hiện cascade delete.
+   * 
+   * LƯU Ý: Cần check xem questions có đang được sử dụng trong
+   * exam nào không trước khi xóa.
+   * 
+   * @param mediaQuestionId - Media question ID
+   * @returns Number of deleted questions
+   */
+  async deleteByMediaQuestionId(mediaQuestionId: number): Promise<number> {
+    // First check if any question is used in exams
+    const questions = await this.findByMediaQuestionId(mediaQuestionId);
+    
+    for (const question of questions) {
+      const usageStats = await this.getUsageStats(question.ID);
+      if (usageStats && usageStats.usedInExams > 0) {
+        throw new Error(
+          `Cannot delete questions: Question ${question.ID} is used in ${usageStats.usedInExams} exam(s)`
+        );
+      }
+    }
+
+    // Delete all questions
+    const result = await this.repository.delete({
+      MediaQuestionID: mediaQuestionId,
+    });
+
+    return result.affected || 0;
+  }
+
+  /**
+   * Validate OrderInGroup uniqueness trong một media
+   * 
+   * Đảm bảo rằng không có hai questions nào có cùng OrderInGroup
+   * trong một media group. Method này check trước khi save.
+   * 
+   * @param mediaQuestionId - Media question ID
+   * @param orderInGroup - Order to check
+   * @param excludeQuestionId - Question ID to exclude (khi update)
+   * @returns True if order is unique
+   */
+  async isOrderInGroupUnique(
+    mediaQuestionId: number,
+    orderInGroup: number,
+    excludeQuestionId?: number
+  ): Promise<boolean> {
+    const queryBuilder = this.repository
+      .createQueryBuilder('question')
+      .where('question.MediaQuestionID = :mediaId', { 
+        mediaId: mediaQuestionId 
+      })
+      .andWhere('question.OrderInGroup = :order', { 
+        order: orderInGroup 
+      });
+
+    if (excludeQuestionId) {
+      queryBuilder.andWhere('question.ID != :excludeId', { 
+        excludeId: excludeQuestionId 
+      });
+    }
+
+    const count = await queryBuilder.getCount();
+    return count === 0;
+  }
+
+  /**
+   * Get media groups với question counts
+   * 
+   * Helper method để lấy danh sách media kèm số lượng questions.
+   * Useful cho UI browse media groups.
+   * 
+   * @param filters - Filter options
+   * @returns Media groups với counts
+   */
+  async getMediaGroupsWithCounts(filters?: {
+    Skill?: string;
+    Section?: string;
+  }): Promise<Array<{
+    mediaQuestionId: number;
+    questionCount: number;
+    media: MediaQuestion;
+  }>> {
+    const queryBuilder = this.repository
+      .createQueryBuilder('question')
+      .leftJoinAndSelect('question.mediaQuestion', 'media')
+      .select('question.MediaQuestionID', 'mediaQuestionId')
+      .addSelect('COUNT(question.ID)', 'questionCount')
+      .groupBy('question.MediaQuestionID');
+
+    if (filters?.Skill) {
+      queryBuilder.andWhere('media.Skill = :skill', { skill: filters.Skill });
+    }
+
+    if (filters?.Section) {
+      queryBuilder.andWhere('media.Section = :section', { 
+        section: filters.Section 
+      });
+    }
+
+    const results = await queryBuilder.getRawMany();
+
+    // Load full media details
+    const enriched = await Promise.all(
+      results.map(async (result) => {
+        const media = await this.mediaRepository.findOne({
+          where: { ID: result.mediaQuestionId },
+        });
+
+        return {
+          mediaQuestionId: result.mediaQuestionId,
+          questionCount: parseInt(result.questionCount),
+          media: media!,
+        };
+      })
+    );
+
+    return enriched.filter(item => item.media);
+  }
 }

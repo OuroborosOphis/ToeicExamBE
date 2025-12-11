@@ -15,6 +15,7 @@ import examRoutes from './presentation/routes/exam.routes';
 import attemptRoutes from './presentation/routes/attempt.routes';
 import questionRoutes from './presentation/routes/question.routes';
 import commentRoutes from './presentation/routes/comment.routes';
+import mediaGroupRoutes from './presentation/routes/media-group.routes';
 
 /**
  * TOEIC Exam Practice Backend Server
@@ -172,6 +173,9 @@ function createApp(): Application {
    * Routes are mounted under the API prefix for clear namespacing.
    * This makes it easy to version the API later (e.g., /api/v2/exam)
    */
+
+  // Media group routes - Must come before exam routes to avoid conflicts
+  app.use(`${API_PREFIX}/media-groups`, mediaGroupRoutes);
   app.use(`${API_PREFIX}/exams`, examRoutes);
   app.use(`${API_PREFIX}/attempts`, attemptRoutes);
   app.use(`${API_PREFIX}/questions`, questionRoutes);
@@ -192,6 +196,7 @@ function createApp(): Application {
         attempts: `${API_PREFIX}/attempts`,
         questions: `${API_PREFIX}/questions`,
         comments: `${API_PREFIX}/comments`,
+        mediaGroups: `${API_PREFIX}/media-groups`,
       },
       documentation: `${API_PREFIX}/docs`, // Swagger docs when implemented
     });
@@ -274,6 +279,7 @@ async function startServer(): Promise<void> {
       console.log(`  - Attempts: ${API_PREFIX}/attempts`);
       console.log(`  - Questions: ${API_PREFIX}/questions`);
       console.log(`  - Comments: ${API_PREFIX}/comments`);
+      console.log(`  - Media Groups: ${API_PREFIX}/media-groups`);
       console.log('');
       console.log('Press CTRL+C to stop the server');
       console.log('');

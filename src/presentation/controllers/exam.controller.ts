@@ -457,4 +457,409 @@ export class ExamController {
       data: duplicatedExam,
     });
   });
+
+  /**
+   * POST /api/exam/exams/:examId/media-groups
+   * 
+   * Add media group (tất cả questions) vào exam
+   * 
+   * Request body:
+   *   - mediaGroupId: ID của media group
+   *   - orderIndex: Vị trí bắt đầu trong exam
+   * 
+   * Requires: Authentication, Teacher or Admin role
+   * 
+   * Response bao gồm:
+   *   - Updated exam
+   *   - Số questions đã add
+   *   - Start và end OrderIndex
+   */
+  addMediaGroup = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+      const examId = parseInt(req.params.examId);
+
+      if (isNaN(examId)) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid exam ID',
+          error: 'INVALID_PARAMETER',
+        });
+        return;
+      }
+
+      const { mediaGroupId, orderIndex } = req.body;
+
+      // Validate request body
+      if (!mediaGroupId || !orderIndex) {
+        res.status(400).json({
+          success: false,
+          message: 'Media group ID and order index are required',
+          error: 'INVALID_REQUEST',
+        });
+        return;
+      }
+
+      const userId = req.user!.userId;
+
+      // Call service để add media group
+      const result = await this.examService.addMediaGroupToExam(
+        examId,
+        parseInt(mediaGroupId),
+        parseInt(orderIndex),
+        userId
+      );
+
+      res.status(200).json({
+        success: true,
+        message: `Successfully added media group with ${result.questionsAdded} questions`,
+        data: {
+          exam: result.exam,
+          questionsAdded: result.questionsAdded,
+          startOrderIndex: result.startOrderIndex,
+          endOrderIndex: result.endOrderIndex,
+        },
+      });
+    }
+  );
+
+  /**
+   * DELETE /api/exam/exams/:examId/media-groups/:mediaGroupId
+   * 
+   * Remove media group khỏi exam
+   * 
+   * Path params:
+   *   - examId: Exam ID
+   *   - mediaGroupId: Media group ID to remove
+   * 
+   * Requires: Authentication, Teacher or Admin role
+   */
+  removeMediaGroup = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+      const examId = parseInt(req.params.examId);
+      const mediaGroupId = parseInt(req.params.mediaGroupId);
+
+      if (isNaN(examId) || isNaN(mediaGroupId)) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid exam ID or media group ID',
+          error: 'INVALID_PARAMETER',
+        });
+        return;
+      }
+
+      const userId = req.user!.userId;
+
+      const removedCount = await this.examService.removeMediaGroupFromExam(
+        examId,
+        mediaGroupId,
+        userId
+      );
+
+      res.status(200).json({
+        success: true,
+        message: `Removed ${removedCount} question(s) from exam`,
+        data: { removedCount },
+      });
+    }
+  );
+
+  /**
+   * GET /api/exam/exams/:examId/content-organized
+   * 
+   * Get exam content organized by media groups
+   * 
+   * Returns:
+   *   - mediaGroups: Groups với questions
+   *   - standaloneQuestions: Questions không thuộc group
+   * 
+   * Requires: Authentication
+   * 
+   * Use case: UI hiển thị exam content với media được
+   * group lại thay vì show riêng lẻ cho mỗi câu
+   */
+  getOrganizedContent = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+      const examId = parseInt(req.params.examId);
+
+      if (isNaN(examId)) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid exam ID',
+          error: 'INVALID_PARAMETER',
+        });
+        return;
+      }
+
+      const content = await this.examService.getExamContentOrganized(examId);
+
+      res.status(200).json({
+        success: true,
+        data: content,
+      });
+    }
+  );
+
+  /**
+   * PUT /api/exam/exams/:examId/media-groups/:mediaGroupId/position
+   * 
+   * Move media group to different position trong exam
+   * 
+   * Request body:
+   *   - newOrderIndex: New starting position
+   * 
+   * Requires: Authentication, Teacher or Admin role
+   * 
+   * Use case: Giáo viên drag-drop media group để
+   * reorder trong exam builder UI
+   */
+  moveMediaGroup = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+      const examId = parseInt(req.params.examId);
+      const mediaGroupId = parseInt(req.params.mediaGroupId);
+
+      if (isNaN(examId) || isNaN(mediaGroupId)) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid exam ID or media group ID',
+          error: 'INVALID_PARAMETER',
+        });
+        return;
+      }
+
+      const { newOrderIndex } = req.body;
+
+      if (!newOrderIndex || isNaN(parseInt(newOrderIndex))) {
+        res.status(400).json({
+          success: false,
+          message: 'New order index is required',
+          error: 'INVALID_REQUEST',
+        });
+        return;
+      }
+
+      const userId = req.user!.userId;
+
+      const movedCount = await this.examService.moveMediaGroupInExam(
+        examId,
+        mediaGroupId,
+        parseInt(newOrderIndex),
+        userId
+      );
+
+      res.status(200).json({
+        success: true,
+        message: `Moved ${movedCount} question(s) to new position`,
+        data: { movedCount, newStartOrderIndex: newOrderIndex },
+      });
+    }
+  );
+
+  /**
+   * GET /api/exam/exams/:examId/media-groups-summary
+   * 
+   * Get quick summary của media groups trong exam
+   * 
+   * Requires: Authentication, Teacher or Admin role
+   * 
+   * Response includes:
+   *   - Total questions và breakdown
+   *   - Media groups list với question counts
+   *   - Section distribution
+   * 
+   * Use case: Dashboard hoặc exam list cần show
+   * quick overview của exam structure
+   */
+  getMediaGroupSummary = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+      const examId = parseInt(req.params.examId);
+
+      if (isNaN(examId)) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid exam ID',
+          error: 'INVALID_PARAMETER',
+        });
+        return;
+      }
+
+      const summary = await this.examService.getExamMediaGroupSummary(examId);
+
+      res.status(200).json({
+        success: true,
+        data: summary,
+      });
+    }
+  );
+
+  /**
+   * POST /api/exam/exams/:examId/validate-structure
+   * 
+   * Validate exam structure
+   * 
+   * Requires: Authentication, Teacher or Admin role
+   * 
+   * Returns:
+   *   - isValid: Boolean
+   *   - issues: Array of issue descriptions
+   * 
+   * Use case: Trước khi publish exam, check xem
+   * có structural issues không (gaps, duplicates, etc.)
+   */
+  validateStructure = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+      const examId = parseInt(req.params.examId);
+
+      if (isNaN(examId)) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid exam ID',
+          error: 'INVALID_PARAMETER',
+        });
+        return;
+      }
+
+      const validation = await this.examService.validateExamStructure(examId);
+
+      const statusCode = validation.isValid ? 200 : 422;
+
+      res.status(statusCode).json({
+        success: validation.isValid,
+        message: validation.isValid 
+          ? 'Exam structure is valid' 
+          : 'Exam structure has issues',
+        data: validation,
+      });
+    }
+  );
+
+  /**
+   * POST /api/exam/exams/:examId/compact-order
+   * 
+   * Auto-fix OrderIndex gaps trong exam
+   * 
+   * Requires: Authentication, Teacher or Admin role
+   * 
+   * Response includes số questions được reorder
+   * 
+   * Use case: Sau khi xóa nhiều questions/groups,
+   * OrderIndex có gaps. Method này compact lại thành
+   * sequence liên tục (1, 2, 3, 4...)
+   */
+  compactOrder = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+      const examId = parseInt(req.params.examId);
+
+      if (isNaN(examId)) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid exam ID',
+          error: 'INVALID_PARAMETER',
+        });
+        return;
+      }
+
+      const userId = req.user!.userId;
+
+      const reorderedCount = await this.examService.compactExamOrder(
+        examId,
+        userId
+      );
+
+      res.status(200).json({
+        success: true,
+        message: `Compacted order for ${reorderedCount} question(s)`,
+        data: { reorderedCount },
+      });
+    }
+  );
+
+  /**
+   * PUT /api/exam/exams/:examId/questions/:oldQuestionId/replace
+   * 
+   * Replace một question bằng question khác
+   * 
+   * Request body:
+   *   - newQuestionId: ID của question mới
+   * 
+   * Requires: Authentication, Teacher or Admin role
+   * 
+   * Use case: Giáo viên muốn swap một câu hỏi
+   * mà không phải remove và re-add
+   */
+  replaceQuestion = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+      const examId = parseInt(req.params.examId);
+      const oldQuestionId = parseInt(req.params.oldQuestionId);
+
+      if (isNaN(examId) || isNaN(oldQuestionId)) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid exam ID or question ID',
+          error: 'INVALID_PARAMETER',
+        });
+        return;
+      }
+
+      const { newQuestionId } = req.body;
+
+      if (!newQuestionId || isNaN(parseInt(newQuestionId))) {
+        res.status(400).json({
+          success: false,
+          message: 'New question ID is required',
+          error: 'INVALID_REQUEST',
+        });
+        return;
+      }
+
+      const userId = req.user!.userId;
+
+      const success = await this.examService.replaceQuestionInExam(
+        examId,
+        oldQuestionId,
+        parseInt(newQuestionId),
+        userId
+      );
+
+      res.status(200).json({
+        success: true,
+        message: 'Question replaced successfully',
+        data: { success },
+      });
+    }
+  );
+
+  /**
+   * GET /api/exam/exams/:examId/next-order-index
+   * 
+   * Get next available OrderIndex trong exam
+   * 
+   * Requires: Authentication, Teacher or Admin role
+   * 
+   * Response: { nextOrderIndex: number }
+   * 
+   * Use case: UI tạo đề cần biết OrderIndex tiếp theo
+   * available khi add questions/groups
+   */
+  getNextOrderIndex = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+      const examId = parseInt(req.params.examId);
+
+      if (isNaN(examId)) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid exam ID',
+          error: 'INVALID_PARAMETER',
+        });
+        return;
+      }
+
+      const nextIndex = await this.examService
+        .getNextOrderIndex(examId);
+
+      res.status(200).json({
+        success: true,
+        data: { nextOrderIndex: nextIndex },
+      });
+    }
+  );
 }

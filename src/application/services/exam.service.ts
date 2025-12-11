@@ -1,5 +1,6 @@
 import { ExamRepository } from '../../infrastructure/repositories/exam.repository';
 import { QuestionRepository } from '../../infrastructure/repositories/question.repository';
+import { MediaQuestionRepository } from '../../infrastructure/repositories/media-question.repository';
 import {
   CreateExamDto,
   UpdateExamDto,
@@ -28,6 +29,7 @@ import { Exam } from '../../domain/entities/exam.entity';
 export class ExamService {
   private examRepository: ExamRepository;
   private questionRepository: QuestionRepository;
+  private mediaQuestionRepository: MediaQuestionRepository;
 
   /**
    * Constructor initializes the repositories this service depends on.
@@ -42,6 +44,7 @@ export class ExamService {
   constructor() {
     this.examRepository = new ExamRepository();
     this.questionRepository = new QuestionRepository();
+    this.mediaQuestionRepository = new MediaQuestionRepository();
   }
 
   /**
@@ -381,7 +384,7 @@ export class ExamService {
       throw new Error('Exam not found');
     }
 
-    return await this.examRepository.getExamStatistics(examId);
+    return await this.examRepository.getEnhancedStatistics(examId);
   }
 
   /**
@@ -415,15 +418,61 @@ export class ExamService {
    * @param userId - ID of user creating the duplicate
    * @returns Newly created exam
    */
-  async duplicateExam(examId: number, userId: number): Promise<Exam> {
-    // Get the original exam
-    const originalExam = await this.examRepository.findById(examId);
+  // async duplicateExam(examId: number, userId: number): Promise<Exam> {
+  //   // Get the original exam
+  //   const originalExam = await this.examRepository.findById(examId);
 
+  //   if (!originalExam) {
+  //     throw new Error('Exam not found');
+  //   }
+
+  //   // Create a new exam with same properties but new title
+  //   const duplicatedExam = await this.examRepository.create({
+  //     Title: `${originalExam.Title} - Copy`,
+  //     TimeExam: originalExam.TimeExam,
+  //     Type: originalExam.Type,
+  //     ExamTypeID: originalExam.ExamTypeID,
+  //     UserID: userId,
+  //   });
+
+  //   // Copy all questions with their order indices
+  //   if (originalExam.examQuestions && originalExam.examQuestions.length > 0) {
+  //     const questionsToAdd = originalExam.examQuestions.map((eq) => ({
+  //       QuestionID: eq.QuestionID,
+  //       OrderIndex: eq.OrderIndex,
+  //     }));
+
+  //     await this.examRepository.addQuestions(duplicatedExam.ID, questionsToAdd);
+  //   }
+
+  //   // Return the complete duplicated exam
+  //   const completeExam = await this.examRepository.findById(duplicatedExam.ID);
+
+  //   if (!completeExam) {
+  //     throw new Error('Failed to retrieve duplicated exam');
+  //   }
+
+  //   return completeExam;
+  // }
+
+  /**
+   * Clone exam bao gồm media groups
+   * 
+   * Extended version của duplicateExam() để properly handle
+   * media group tracking khi clone.
+   * 
+   * @param examId - Exam ID to clone
+   * @param userId - User tạo clone
+   * @returns Cloned exam
+   */
+  async duplicateExam(examId: number, userId: number): Promise<Exam> {
+    // Get original exam
+    const originalExam = await this.examRepository.findById(examId);
     if (!originalExam) {
       throw new Error('Exam not found');
     }
 
-    // Create a new exam with same properties but new title
+    // Create new exam
     const duplicatedExam = await this.examRepository.create({
       Title: `${originalExam.Title} - Copy`,
       TimeExam: originalExam.TimeExam,
@@ -432,24 +481,552 @@ export class ExamService {
       UserID: userId,
     });
 
-    // Copy all questions with their order indices
+    // Copy questions với media tracking
     if (originalExam.examQuestions && originalExam.examQuestions.length > 0) {
-      const questionsToAdd = originalExam.examQuestions.map((eq) => ({
+      const questionsToAdd = originalExam.examQuestions.map(eq => ({
         QuestionID: eq.QuestionID,
         OrderIndex: eq.OrderIndex,
+        MediaQuestionID: eq.MediaQuestionID,
+        IsGrouped: eq.IsGrouped,
       }));
 
-      await this.examRepository.addQuestions(duplicatedExam.ID, questionsToAdd);
+      await this.examRepository.addQuestionsWithMediaTracking(
+        duplicatedExam.ID,
+        questionsToAdd
+      );
     }
 
-    // Return the complete duplicated exam
+    // Return complete duplicated exam
     const completeExam = await this.examRepository.findById(duplicatedExam.ID);
-
     if (!completeExam) {
       throw new Error('Failed to retrieve duplicated exam');
     }
 
     return completeExam;
+  }
+
+
+  /**
+   * Add media group vào exam (core new method)
+   * 
+   * Method này là feature chính của media group functionality.
+   * Nó tự động tìm tất cả questions của một media, sort chúng,
+   * và add tất cả vào exam với OrderIndex tuần tự.
+   * 
+   * Workflow:
+   * 1. Validate exam và media group tồn tại
+   * 2. Check permissions
+   * 3. Check xem media group đã có trong exam chưa
+   * 4. Get all questions từ media group
+   * 5. Determine OrderIndex cho mỗi question
+   * 6. Create ExamQuestion records với media tracking
+   * 
+   * @param examId - ID của exam
+   * @param mediaQuestionId - ID của media group
+   * @param startingOrderIndex - Vị trí bắt đầu trong exam
+   * @param userId - User thực hiện action
+   * @returns Result object với exam và số questions added
+   */
+  async addMediaGroupToExam(
+    examId: number,
+    mediaQuestionId: number,
+    startingOrderIndex: number,
+    userId: number
+  ): Promise<{
+    exam: Exam;
+    questionsAdded: number;
+    startOrderIndex: number;
+    endOrderIndex: number;
+  }> {
+    // Step 1: Validate exam
+    const exam = await this.examRepository.findById(examId);
+    if (!exam) {
+      throw new Error('Exam not found');
+    }
+
+    // Step 2: Check permissions
+    if (exam.UserID !== userId) {
+      throw new Error('You do not have permission to modify this exam');
+    }
+
+    // Step 3: Validate media question
+    const media = await this.mediaQuestionRepository.findById(
+      mediaQuestionId,
+      false // Don't need questions yet
+    );
+    if (!media) {
+      throw new Error('Media group not found');
+    }
+
+    // Step 4: Check if already exists trong exam
+    const alreadyExists = await this.examRepository.containsMediaGroup(
+      examId,
+      mediaQuestionId
+    );
+    if (alreadyExists) {
+      throw new Error('This media group is already in the exam');
+    }
+
+    // Step 5: Get all questions from media group
+    const questions = await this.questionRepository.findByMediaQuestionId(
+      mediaQuestionId,
+      { sortByOrder: true }
+    );
+
+    if (questions.length === 0) {
+      throw new Error('Media group has no questions');
+    }
+
+    console.log(
+      `Adding media group "${media.GroupTitle || 'Untitled'}" ` +
+      `with ${questions.length} questions to exam`
+    );
+
+    // Step 6: Prepare ExamQuestion data
+    const questionsToAdd = questions.map((question, index) => ({
+      QuestionID: question.ID,
+      OrderIndex: startingOrderIndex + index,
+      MediaQuestionID: mediaQuestionId,
+      IsGrouped: true,
+    }));
+
+    // Step 7: Add all questions
+    await this.examRepository.addQuestionsWithMediaTracking(
+      examId,
+      questionsToAdd
+    );
+
+    // Step 8: Return result
+    const updatedExam = await this.examRepository.findById(examId);
+    if (!updatedExam) {
+      throw new Error('Failed to retrieve updated exam');
+    }
+
+    return {
+      exam: updatedExam,
+      questionsAdded: questions.length,
+      startOrderIndex: startingOrderIndex,
+      endOrderIndex: startingOrderIndex + questions.length - 1,
+    };
+  }
+
+  /**
+   * Remove media group khỏi exam
+   * 
+   * Xóa tất cả questions của một media group từ exam.
+   * Đảm bảo entire group được xóa, không để lại câu mồ côi.
+   * 
+   * @param examId - Exam ID
+   * @param mediaQuestionId - Media group ID to remove
+   * @param userId - User thực hiện action
+   * @returns Number of questions removed
+   */
+  async removeMediaGroupFromExam(
+    examId: number,
+    mediaQuestionId: number,
+    userId: number
+  ): Promise<number> {
+    // Validate exam và permissions
+    const exam = await this.examRepository.findById(examId);
+    if (!exam) {
+      throw new Error('Exam not found');
+    }
+
+    if (exam.UserID !== userId) {
+      throw new Error('You do not have permission to modify this exam');
+    }
+
+    // Check if media group exists trong exam
+    const exists = await this.examRepository.containsMediaGroup(
+      examId,
+      mediaQuestionId
+    );
+    if (!exists) {
+      throw new Error('Media group not found in this exam');
+    }
+
+    // Remove the group
+    const removedCount = await this.examRepository.removeMediaGroup(
+      examId,
+      mediaQuestionId
+    );
+
+    console.log(
+      `Removed media group ${mediaQuestionId} with ${removedCount} questions from exam ${examId}`
+    );
+
+    return removedCount;
+  }
+
+  /**
+   * Get exam content organized by media groups
+   * 
+   * Method này transform exam content thành structure organized:
+   * - Media groups: Nhóm questions có cùng media
+   * - Standalone questions: Questions không thuộc group
+   * 
+   * Perfect cho UI rendering với media được hiển thị một lần
+   * cho cả nhóm thay vì lặp lại cho mỗi câu.
+   * 
+   * @param examId - Exam ID
+   * @returns Organized content structure
+   */
+  async getExamContentOrganized(examId: number): Promise<{
+    mediaGroups: Array<{
+      mediaQuestionId: number;
+      title: string;
+      startOrderIndex: number;
+      media: {
+        skill: string;
+        type: string;
+        section: string;
+        audioUrl?: string;
+        imageUrl?: string;
+        script?: string;
+      };
+      questions: Array<{
+        id: number;
+        questionText: string;
+        orderIndex: number;
+        orderInGroup: number;
+        choices: Array<{
+          id: number;
+          attribute: string;
+          content: string;
+        }>;
+      }>;
+    }>;
+    standaloneQuestions: Array<{
+      id: number;
+      questionText: string;
+      orderIndex: number;
+      media: {
+        skill: string;
+        type: string;
+        section: string;
+      };
+      choices: Array<{
+        id: number;
+        attribute: string;
+        content: string;
+      }>;
+    }>;
+  }> {
+    // Get organized content từ repository
+    const { mediaGroups, standaloneQuestions } = 
+      await this.examRepository.getOrganizedContent(examId);
+
+    // Transform media groups
+    const transformedGroups = await Promise.all(
+      Array.from(mediaGroups.entries()).map(async ([mediaId, examQuestions]) => {
+        // Get media info
+        const media = await this.mediaQuestionRepository.findById(mediaId);
+        
+        if (!media) {
+          throw new Error(`Media question ${mediaId} not found`);
+        }
+
+        // Sort questions by OrderIndex
+        const sortedQuestions = examQuestions.sort(
+          (a, b) => a.OrderIndex - b.OrderIndex
+        );
+
+        return {
+          mediaQuestionId: mediaId,
+          title: media.GroupTitle || `${media.Type} - Part ${media.Section}`,
+          startOrderIndex: sortedQuestions[0].OrderIndex,
+          
+          media: {
+            skill: media.Skill || '',
+            type: media.Type,
+            section: media.Section || '',
+            audioUrl: media.AudioUrl,
+            imageUrl: media.ImageUrl,
+            script: media.Scirpt,
+          },
+
+          questions: sortedQuestions.map(eq => ({
+            id: eq.question.ID,
+            questionText: eq.question.QuestionText || '',
+            orderIndex: eq.OrderIndex,
+            orderInGroup: eq.question.OrderInGroup,
+            choices: eq.question.choices.map(c => ({
+              id: c.ID,
+              attribute: c.Attribute || '',
+              content: c.Content || '',
+              // IsCorrect intentionally omitted for students
+            })),
+          })),
+        };
+      })
+    );
+
+    // Sort groups by starting order
+    transformedGroups.sort((a, b) => a.startOrderIndex - b.startOrderIndex);
+
+    // Transform standalone questions
+    const transformedStandalone = standaloneQuestions
+      .sort((a, b) => a.OrderIndex - b.OrderIndex)
+      .map(eq => ({
+        id: eq.question.ID,
+        questionText: eq.question.QuestionText || '',
+        orderIndex: eq.OrderIndex,
+        media: {
+          skill: eq.question.mediaQuestion.Skill || '',
+          type: eq.question.mediaQuestion.Type,
+          section: eq.question.mediaQuestion.Section || '',
+        },
+        choices: eq.question.choices.map(c => ({
+          id: c.ID,
+          attribute: c.Attribute || '',
+          content: c.Content || '',
+        })),
+      }));
+
+    return {
+      mediaGroups: transformedGroups,
+      standaloneQuestions: transformedStandalone,
+    };
+  }
+
+  /**
+   * Move media group to different position
+   * 
+   * Khi giáo viên muốn reorder groups trong exam, method này
+   * di chuyển entire group đến vị trí mới mà maintain relative
+   * order của questions trong group.
+   * 
+   * @param examId - Exam ID
+   * @param mediaQuestionId - Media group to move
+   * @param newStartOrderIndex - New starting position
+   * @param userId - User thực hiện action
+   * @returns Number of questions moved
+   */
+  async moveMediaGroupInExam(
+    examId: number,
+    mediaQuestionId: number,
+    newStartOrderIndex: number,
+    userId: number
+  ): Promise<number> {
+    // Validate permissions
+    const exam = await this.examRepository.findById(examId);
+    if (!exam) {
+      throw new Error('Exam not found');
+    }
+
+    if (exam.UserID !== userId) {
+      throw new Error('You do not have permission to modify this exam');
+    }
+
+    // Perform the move
+    return await this.examRepository.moveMediaGroup(
+      examId,
+      mediaQuestionId,
+      newStartOrderIndex
+    );
+  }
+
+  /**
+   * Validate exam structure
+   * 
+   * Check xem exam có structure hợp lệ không.
+   * Useful trước khi publish exam hoặc khi troubleshooting issues.
+   * 
+   * @param examId - Exam ID
+   * @returns Validation result
+   */
+  async validateExamStructure(examId: number): Promise<{
+    isValid: boolean;
+    issues: string[];
+  }> {
+    const exam = await this.examRepository.findById(examId);
+    if (!exam) {
+      throw new Error('Exam not found');
+    }
+
+    return await this.examRepository.validateExamStructure(examId);
+  }
+
+  /**
+   * Auto-fix exam OrderIndex gaps
+   * 
+   * Nếu exam có gaps trong OrderIndex sequence (ví dụ: 1, 2, 5, 6),
+   * method này tự động compact lại thành sequence liên tục (1, 2, 3, 4).
+   * 
+   * Useful sau khi xóa questions/groups khỏi exam.
+   * 
+   * @param examId - Exam ID
+   * @param userId - User thực hiện action
+   * @returns Number of questions reordered
+   */
+  async compactExamOrder(
+    examId: number,
+    userId: number
+  ): Promise<number> {
+    // Validate permissions
+    const exam = await this.examRepository.findById(examId);
+    if (!exam) {
+      throw new Error('Exam not found');
+    }
+
+    if (exam.UserID !== userId) {
+      throw new Error('You do not have permission to modify this exam');
+    }
+
+    // Get all exam questions sorted by current order
+    const examQuestions = (exam.examQuestions || [])
+      .sort((a, b) => a.OrderIndex - b.OrderIndex);
+
+    // Create updates để compact sequence
+    const updates = examQuestions.map((eq, index) => ({
+      examQuestionId: eq.ID,
+      newOrderIndex: index + 1, // Start from 1
+    }));
+
+    return await this.examRepository.reorderQuestions(updates);
+  }
+
+  /**
+   * Get summary of media groups trong exam
+   * 
+   * Quick overview của exam structure để hiển thị
+   * trong exam list hoặc dashboard.
+   * 
+   * @param examId - Exam ID
+   * @returns Summary object
+   */
+  async getExamMediaGroupSummary(examId: number): Promise<{
+    totalQuestions: number;
+    totalMediaGroups: number;
+    questionsInGroups: number;
+    standaloneQuestions: number;
+    groupBreakdown: Array<{
+      mediaQuestionId: number;
+      title: string;
+      questionCount: number;
+      section: string;
+    }>;
+  }> {
+    const stats = await this.examRepository.getEnhancedStatistics(examId);
+    
+    if (!stats) {
+      throw new Error('Exam not found');
+    }
+
+    // Get details của mỗi media group
+    const groupBreakdown = await Promise.all(
+      (stats.mediaGroupDetails || []).map(async (g: any) => {
+        const media = await this.mediaQuestionRepository.findById(
+          g.mediaQuestionId
+        );
+
+        return {
+          mediaQuestionId: g.mediaQuestionId,
+          title: media?.GroupTitle || `Part ${media?.Section || '?'}`,
+          questionCount: g.questionCount,
+          section: media?.Section || 'Unknown',
+        };
+      })
+    );
+
+    return {
+      totalQuestions: stats.totalQuestions,
+      totalMediaGroups: stats.totalMediaGroups,
+      questionsInGroups: stats.questionsInGroups,
+      standaloneQuestions: stats.standaloneQuestions,
+      groupBreakdown,
+    };
+  }
+
+  /**
+   * Replace question trong exam
+   * 
+   * Thay thế một question bằng question khác trong exam,
+   * maintain OrderIndex và media group tracking.
+   * 
+   * Useful khi giáo viên muốn swap một câu hỏi mà không
+   * phải remove và re-add.
+   * 
+   * @param examId - Exam ID
+   * @param oldQuestionId - Question ID to replace
+   * @param newQuestionId - New question ID
+   * @param userId - User thực hiện action
+   * @returns Success boolean
+   */
+  async replaceQuestionInExam(
+    examId: number,
+    oldQuestionId: number,
+    newQuestionId: number,
+    userId: number
+  ): Promise<boolean> {
+    // Validate permissions
+    const exam = await this.examRepository.findById(examId);
+    if (!exam) {
+      throw new Error('Exam not found');
+    }
+
+    if (exam.UserID !== userId) {
+      throw new Error('You do not have permission to modify this exam');
+    }
+
+    // Find ExamQuestion record
+    const examQuestion = exam.examQuestions?.find(
+      eq => eq.QuestionID === oldQuestionId
+    );
+
+    if (!examQuestion) {
+      throw new Error('Question not found in exam');
+    }
+
+    // Validate new question exists
+    const newQuestion = await this.questionRepository.findById(newQuestionId);
+    if (!newQuestion) {
+      throw new Error('New question not found');
+    }
+
+    // If replacing trong media group, validate new question
+    // cũng thuộc cùng media
+    if (examQuestion.IsGrouped && examQuestion.MediaQuestionID) {
+      if (newQuestion.MediaQuestionID !== examQuestion.MediaQuestionID) {
+        throw new Error(
+          'Cannot replace with question from different media group'
+        );
+      }
+    }
+
+    // Update ExamQuestion record thông qua repository method
+    const updated = await this.examRepository.updateExamQuestion(
+      examQuestion.ID,
+      { QuestionID: newQuestionId }
+    );
+
+    if (!updated) {
+      throw new Error('Failed to update exam question');
+    }
+    
+    return true;
+  }
+
+
+  /**
+   * Get next available OrderIndex cho exam
+   * 
+   * Method này expose functionality từ repository một cách clean.
+   * Controller không cần biết về repository implementation details,
+   * chỉ cần call service method này.
+   * 
+   * @param examId - Exam ID
+   * @returns Next available OrderIndex
+   */
+  async getNextOrderIndex(examId: number): Promise<number> {
+    // Validate exam exists trước
+    const exam = await this.examRepository.findById(examId);
+    if (!exam) {
+      throw new Error('Exam not found');
+    }
+
+    // Delegate to repository
+    return await this.examRepository.getNextOrderIndex(examId);
   }
 
   /**

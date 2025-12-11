@@ -10,7 +10,7 @@
     "test:connection": "ts-node src/test-connection.ts",
     "typeorm": "typeorm-ts-node-commonjs",
     "migration:generate": "npm run typeorm -- migration:generate",
-    "migration:run": "npm run typeorm -- migration:run",
+    "migration:run": "npm run typeorm -- migration:run -d src/infrastructure/database/datasource-migration.ts",
     "migration:revert": "npm run typeorm -- migration:revert",
     "seed": "ts-node src/seed-data.ts",
     "test:service": "ts-node src/test-service.ts"
