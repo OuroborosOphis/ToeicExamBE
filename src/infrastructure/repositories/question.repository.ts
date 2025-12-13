@@ -453,6 +453,30 @@ export class QuestionRepository {
   }
 
   /**
+   * Lấy tất cả questions thuộc nhiều media IDs
+   * 
+   * Dùng khi tạo đề thi bằng cách chọn multiple media blocks.
+   * Mỗi media có thể chứa 1+ questions.
+   * 
+   * @param mediaIds - Array of MediaQuestionID
+   * @returns All questions từ những media đó
+   */
+  async findByMediaIds(mediaIds: number[]): Promise<Question[]> {
+    if (!mediaIds || mediaIds.length === 0) {
+      return [];
+    }
+
+    return await this.repository
+      .createQueryBuilder('question')
+      .where('question.MediaQuestionID IN (:...mediaIds)', { mediaIds })
+      .leftJoinAndSelect('question.mediaQuestion', 'media')
+      .leftJoinAndSelect('question.choices', 'choices')
+      .orderBy('question.MediaQuestionID', 'ASC')
+      .addOrderBy('question.OrderInGroup', 'ASC')
+      .getMany();
+  }
+
+  /**
    * Tạo nhiều questions cùng lúc cho một media group
    * 
    * Khi giáo viên tạo một media group mới với nhiều questions,

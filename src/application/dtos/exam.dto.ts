@@ -42,6 +42,11 @@ export class CreateExamDto {
 
   @IsArray()
   @IsOptional()
+  @IsInt({ each: true })
+  MediaQuestionIDs?: number[];
+
+  @IsArray()
+  @IsOptional()
   @ValidateNested({ each: true })
   @Type(() => ExamQuestionDto)
   questions?: ExamQuestionDto[];
@@ -197,6 +202,7 @@ export class QuestionDetailDto {
   QuestionText: string;
   Choices: ChoiceDetailDto[];
   Media: {
+    ID: number;        
     Skill: string;
     Type: string;
     Section: string;

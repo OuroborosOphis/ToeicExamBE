@@ -53,13 +53,17 @@ export class ExamService {
    * This method handles the complete process of exam creation:
    * 1. Validates that the exam type exists
    * 2. Creates the exam record
-   * 3. If questions are provided, validates they exist and adds them
+   * 3. If questions or media blocks are provided, validates and adds them
    * 4. Returns the complete exam data
+   * 
+   * Supports two modes:
+   * - questions: Directly add specific question IDs
+   * - MediaQuestionIDs: Select entire media blocks (e.g., Reading passage with 3 questions)
    * 
    * Business rules enforced:
    * - Exam must have a valid title
    * - Time limit must be reasonable (1-240 minutes)
-   * - All referenced questions must exist in the database
+   * - All referenced questions/media must exist in the database
    * - Questions must be added in proper order
    * 
    * @param examData - Data for creating the exam
@@ -86,9 +90,16 @@ export class ExamService {
       UserID: userId,
     });
 
-    // If questions are provided, add them to the exam
+    // Collect all questions from both explicit questions and media blocks
+    const questionsToAdd: Array<{
+      QuestionID: number;
+      OrderIndex: number;
+      MediaQuestionID?: number;
+      IsGrouped?: boolean;
+    }> = [];
+
+    // Process explicitly provided questions
     if (examData.questions && examData.questions.length > 0) {
-      // Validate that all questions exist
       const questionIds = examData.questions.map((q) => q.QuestionID);
       const existingQuestions = await this.questionRepository.findByIds(questionIds);
 
@@ -96,14 +107,49 @@ export class ExamService {
         throw new Error('Some questions do not exist');
       }
 
-      // Add questions with their order indices
-      await this.examRepository.addQuestions(
-        exam.ID,
-        examData.questions.map((q) => ({
+      // Add explicit questions with their order indices
+      examData.questions.forEach((q) => {
+        questionsToAdd.push({
           QuestionID: q.QuestionID,
           OrderIndex: q.OrderIndex,
-        }))
+        });
+      });
+    }
+
+    // Process media blocks
+    if (examData.MediaQuestionIDs && examData.MediaQuestionIDs.length > 0) {
+      // Fetch all questions from selected media blocks
+      const mediaQuestions = await this.questionRepository.findByMediaIds(
+        examData.MediaQuestionIDs
       );
+
+      if (mediaQuestions.length === 0) {
+        throw new Error('No questions found for selected media blocks');
+      }
+
+      // Determine starting order index
+      let startOrder = 1;
+      if (questionsToAdd.length > 0) {
+        startOrder = Math.max(...questionsToAdd.map((q) => q.OrderIndex)) + 1;
+      }
+
+      // Add media-derived questions with auto-incremented order
+      mediaQuestions.forEach((q, idx) => {
+        // Skip if already added explicitly
+        if (!questionsToAdd.some((eq) => eq.QuestionID === q.ID)) {
+          questionsToAdd.push({
+            QuestionID: q.ID,
+            OrderIndex: startOrder + idx,
+            MediaQuestionID: q.MediaQuestionID,
+            IsGrouped: true, // Mark as part of media group
+          });
+        }
+      });
+    }
+
+    // Add all questions to exam
+    if (questionsToAdd.length > 0) {
+      await this.examRepository.addQuestions(exam.ID, questionsToAdd);
     }
 
     // Reload exam with all relations to return complete data
@@ -1072,6 +1118,7 @@ export class ExamService {
                 // Deliberately exclude IsCorrect for security
               })),
               Media: {
+                ID: eq.question.mediaQuestion.ID,
                 Skill: eq.question.mediaQuestion.Skill || '',
                 Type: eq.question.mediaQuestion.Type,
                 Section: eq.question.mediaQuestion.Section || '',
