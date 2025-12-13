@@ -16,6 +16,7 @@ import attemptRoutes from './presentation/routes/attempt.routes';
 import questionRoutes from './presentation/routes/question.routes';
 import commentRoutes from './presentation/routes/comment.routes';
 import mediaGroupRoutes from './presentation/routes/media-group.routes';
+import examTypeRoutes from './presentation/routes/exam-types.routes';
 
 /**
  * TOEIC Exam Practice Backend Server
@@ -177,6 +178,7 @@ function createApp(): Application {
   // Media group routes - Must come before exam routes to avoid conflicts
   app.use(`${API_PREFIX}/media-groups`, mediaGroupRoutes);
   app.use(`${API_PREFIX}/exams`, examRoutes);
+  app.use(`${API_PREFIX}/exam-types`, examTypeRoutes);
   app.use(`${API_PREFIX}/attempts`, attemptRoutes);
   app.use(`${API_PREFIX}/questions`, questionRoutes);
   app.use(`${API_PREFIX}/comments`, commentRoutes);
@@ -193,6 +195,7 @@ function createApp(): Application {
       version: '1.0.0',
       endpoints: {
         exams: `${API_PREFIX}/exams`,
+        examTypes: `${API_PREFIX}/exam-types`,
         attempts: `${API_PREFIX}/attempts`,
         questions: `${API_PREFIX}/questions`,
         comments: `${API_PREFIX}/comments`,

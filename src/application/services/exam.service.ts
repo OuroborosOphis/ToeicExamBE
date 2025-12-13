@@ -8,7 +8,12 @@ import {
   QuestionDetailDto,
   ChoiceDetailDto,
 } from '../dtos/exam.dto';
+import {
+  CreateExamTypeDto,
+  UpdateExamTypeDto,
+} from '../dtos/exam-type.dto';
 import { Exam } from '../../domain/entities/exam.entity';
+import { ExamType } from '../../domain/entities/exam-type.entity';
 
 /**
  * ExamService handles all business logic related to exam management
@@ -1053,6 +1058,50 @@ export class ExamService {
     return true;
   }
 
+  // ================ Exam Type Management ================= //
+
+  async getExamTypes(): Promise<ExamType[]> {
+    return await this.examRepository.findAllExamTypes();
+  }
+
+  async createExamType(data: CreateExamTypeDto): Promise<ExamType> {
+    // Check duplicate Code
+    const existing = await this.examRepository.findExamTypeByCode(data.Code);
+    if (existing) {
+      throw new Error(`Exam type with code "${data.Code}" already exists`);
+    }
+
+    return await this.examRepository.createExamType(data);
+  }
+
+  async updateExamType(id: number, data: UpdateExamTypeDto): Promise<ExamType> {
+    const examType = await this.examRepository.findExamTypeById(id);
+    if (!examType) {
+      throw new Error('Exam type not found');
+    }
+
+    // Check duplicate Code if updating
+    if (data.Code && data.Code !== examType.Code) {
+      const duplicate = await this.examRepository.findExamTypeByCode(data.Code);
+      if (duplicate) {
+        throw new Error(`Exam type code "${data.Code}" is already in use`);
+      }
+    }
+
+    return await this.examRepository.updateExamType(id, data);
+  }
+
+  async deleteExamType(id: number): Promise<boolean> {
+    // Check if any exam uses this type
+    const examsUsingType = await this.examRepository.countExamsByType(id);
+    if (examsUsingType > 0) {
+      throw new Error(
+        `Cannot delete exam type: ${examsUsingType} exam(s) are using it`
+      );
+    }
+
+    return await this.examRepository.deleteExamType(id);
+  }
 
   /**
    * Get next available OrderIndex cho exam

@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { ExamService } from '../../application/services/exam.service';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { CreateExamDto, UpdateExamDto } from '../../application/dtos/exam.dto';
+import { CreateExamTypeDto, UpdateExamTypeDto } from '@/application/dtos/exam-type.dto';
 import { asyncHandler } from '../middlewares/error.middleware';
 
 /**
@@ -862,4 +863,65 @@ export class ExamController {
       });
     }
   );
+
+  // ================ Exam Type Management ================= //
+
+  getExamTypes = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const examTypes = await this.examService.getExamTypes();
+    
+    res.status(200).json({
+      success: true,
+      data: examTypes,
+    });
+  });
+
+  createExamType = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const createDto: CreateExamTypeDto = req.body;
+    const examType = await this.examService.createExamType(createDto);
+    
+    res.status(201).json({
+      success: true,
+      message: 'Exam type created successfully',
+      data: examType,
+    });
+  });
+
+  updateExamType = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid exam type ID',
+      });
+      return;
+    }
+
+    const updateDto: UpdateExamTypeDto = req.body;
+    const examType = await this.examService.updateExamType(id, updateDto);
+    
+    res.status(200).json({
+      success: true,
+      message: 'Exam type updated successfully',
+      data: examType,
+    });
+  });
+
+  deleteExamType = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid exam type ID',
+      });
+      return;
+    }
+
+    const deleted = await this.examService.deleteExamType(id);
+    
+    res.status(200).json({
+      success: true,
+      message: 'Exam type deleted successfully',
+      data: { deleted },
+    });
+  });
 }

@@ -1,6 +1,7 @@
 import { Repository } from 'typeorm';
 import { AppDataSource } from '../database/config';
 import { Exam } from '../../domain/entities/exam.entity';
+import { ExamType } from '../../domain/entities/exam-type.entity';
 import { ExamQuestion } from '../../domain/entities/exam-question.entity';
 
 /**
@@ -732,5 +733,52 @@ export class ExamRepository {
 
     // Save and return
     return await this.examQuestionRepository.save(examQuestion);
+  }
+
+  // method to manage ExamType entities
+  
+  async findAllExamTypes(): Promise<ExamType[]> {
+    const examTypeRepo = AppDataSource.getRepository(ExamType);
+    return await examTypeRepo.find({
+      order: { Code: 'ASC' }
+    });
+  }
+
+  async findExamTypeById(id: number): Promise<ExamType | null> {
+    const examTypeRepo = AppDataSource.getRepository(ExamType);
+    return await examTypeRepo.findOne({ where: { ID: id } });
+  }
+
+  async findExamTypeByCode(code: string): Promise<ExamType | null> {
+    const examTypeRepo = AppDataSource.getRepository(ExamType);
+    return await examTypeRepo.findOne({ where: { Code: code } });
+  }
+
+  async createExamType(data: Partial<ExamType>): Promise<ExamType> {
+    const examTypeRepo = AppDataSource.getRepository(ExamType);
+    const examType = examTypeRepo.create(data);
+    return await examTypeRepo.save(examType);
+  }
+
+  async updateExamType(id: number, data: Partial<ExamType>): Promise<ExamType> {
+    const examTypeRepo = AppDataSource.getRepository(ExamType);
+    await examTypeRepo.update(id, data);
+    const updated = await examTypeRepo.findOne({ where: { ID: id } });
+    if (!updated) {
+      throw new Error('Failed to retrieve updated exam type');
+    }
+    return updated;
+  }
+
+  async deleteExamType(id: number): Promise<boolean> {
+    const examTypeRepo = AppDataSource.getRepository(ExamType);
+    const result = await examTypeRepo.delete(id);
+    return (result.affected || 0) > 0;
+  }
+
+  async countExamsByType(examTypeId: number): Promise<number> {
+    return await this.repository.count({
+      where: { ExamTypeID: examTypeId }
+    });
   }
 }
