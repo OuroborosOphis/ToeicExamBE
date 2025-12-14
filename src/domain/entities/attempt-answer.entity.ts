@@ -62,7 +62,23 @@ export class AttemptAnswer {
    * - Immutability: If question/choice is edited later, historical data preserved
    * - Analytics: Easy to query statistics without complex joins
    */
-  @Column({ type: 'bit', nullable: true })
+  @Column({
+    type: 'bit',
+    nullable: true,
+    transformer: {
+      to: (value: boolean | number) => value,
+      from: (value: any) => {
+        // Convert Buffer/number to boolean
+        if (Buffer.isBuffer(value)) {
+          return value[0] === 1;
+        }
+        if (typeof value === 'number') {
+          return value === 1;
+        }
+        return Boolean(value);
+      },
+    },
+  })
   IsCorrect: boolean;
 
   /**

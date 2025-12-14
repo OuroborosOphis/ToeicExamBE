@@ -238,27 +238,50 @@ async function testGradingLogic() {
     console.log('='.repeat(70));
     console.log('');
 
-    const dbCheck = await AppDataSource.query(`
-      SELECT 
-        COUNT(*) as total,
-        SUM(CASE WHEN IsCorrect = 1 THEN 1 ELSE 0 END) as correct,
-        SUM(CASE WHEN IsCorrect = 0 THEN 1 ELSE 0 END) as wrong
-      FROM attemptanswer
-      WHERE AttemptID = ?
-    `, [attempt.ID]);
+    // 🔥 FIX: Query với proper boolean handling
+    const dbCheck = await AppDataSource.getRepository('AttemptAnswer')
+    .createQueryBuilder('aa')
+    .select('COUNT(aa.ID)', 'total')
+    .addSelect('SUM(CASE WHEN aa.IsCorrect = 1 THEN 1 ELSE 0 END)', 'correct')
+    .addSelect('SUM(CASE WHEN aa.IsCorrect = 0 THEN 1 ELSE 0 END)', 'wrong')
+    .where('aa.AttemptID = :attemptId', { attemptId: attempt.ID })
+    .getRawOne();
 
     console.log('Database Statistics:');
-    console.log(`   - Total answers in DB: ${dbCheck[0].total}`);
-    console.log(`   - Correct in DB: ${dbCheck[0].correct}`);
-    console.log(`   - Wrong in DB: ${dbCheck[0].wrong}`);
+    console.log(`   - Total answers in DB: ${dbCheck.total}`);
+    console.log(`   - Correct in DB: ${dbCheck.correct}`);
+    console.log(`   - Wrong in DB: ${dbCheck.wrong}`);
     console.log('');
 
-    if (parseInt(dbCheck[0].correct) === results.Analysis.CorrectAnswers) {
-      console.log('✅ Database records match API response');
+    // 🔥 FIX: Also check individual records để debug
+    const sampleRecords = await AppDataSource.query(`
+    SELECT 
+        aa.ID,
+        aa.QuestionID,
+        aa.ChoiceID,
+        aa.IsCorrect,
+        CAST(aa.IsCorrect AS UNSIGNED) as IsCorrectInt
+    FROM attemptanswer aa
+    WHERE aa.AttemptID = ?
+    LIMIT 5
+    `, [attempt.ID]);
+
+    console.log('📋 Sample AttemptAnswer Records:');
+    sampleRecords.forEach((record: any, index: number) => {
+    console.log(`   Record ${index + 1}:`);
+    console.log(`      - Question ID: ${record.QuestionID}`);
+    console.log(`      - Choice ID: ${record.ChoiceID}`);
+    console.log(`      - IsCorrect (raw): ${record.IsCorrect}`);
+    console.log(`      - IsCorrect (int): ${record.IsCorrectInt}`);
+    });
+    console.log('');
+
+    if (parseInt(dbCheck.correct) === results.Analysis.CorrectAnswers) {
+    console.log('✅ Database records match API response');
     } else {
-      console.log('❌ Database mismatch detected!');
-      console.log(`   DB shows: ${dbCheck[0].correct} correct`);
-      console.log(`   API shows: ${results.Analysis.CorrectAnswers} correct`);
+    console.log('❌ Database mismatch detected!');
+    console.log(`   DB shows: ${dbCheck.correct} correct`);
+    console.log(`   API shows: ${results.Analysis.CorrectAnswers} correct`);
     }
     console.log('');
 

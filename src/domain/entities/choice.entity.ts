@@ -57,8 +57,27 @@ export class Choice {
    * Boolean flag indicating if this is the correct answer
    * Only one choice per question should have IsCorrect = true
    * Used during automatic grading to check student answers
+   * 
+   * FIX: Added transformer to convert MySQL BIT type to boolean
+   * MySQL returns BIT as Buffer object, so we need to convert it
    */
-  @Column({ type: 'bit', default: false })
+  @Column({
+    type: 'bit',
+    default: false,
+    transformer: {
+      to: (value: boolean | number) => value,
+      from: (value: any) => {
+        // Convert Buffer/number to boolean
+        if (Buffer.isBuffer(value)) {
+          return value[0] === 1;
+        }
+        if (typeof value === 'number') {
+          return value === 1;
+        }
+        return Boolean(value);
+      },
+    },
+  })
   IsCorrect: boolean;
 
   /**

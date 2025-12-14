@@ -9,9 +9,9 @@
     "start": "node dist/server.js",
     "test:connection": "ts-node src/test-connection.ts",
     "typeorm": "typeorm-ts-node-commonjs",
-    "migration:generate": "npm run typeorm -- migration:generate",
+    "migration:generate": "npm run typeorm -- migration:generate -d src/infrastructure/database/datasource-migration.ts",
     "migration:run": "npm run typeorm -- migration:run -d src/infrastructure/database/datasource-migration.ts",
-    "migration:revert": "npm run typeorm -- migration:revert",
+    "migration:revert": "npm run typeorm -- migration:revert -d src/infrastructure/database/datasource-migration.ts",
     "seed": "ts-node src/seed-data.ts",
     "test:service": "ts-node src/test-service.ts"
   },

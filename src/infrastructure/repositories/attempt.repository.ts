@@ -182,12 +182,17 @@ export class AttemptRepository {
           continue;
         }
 
+        // 🔥 FIX: Explicitly convert to boolean và log để debug
+        const isCorrect = Boolean(selectedChoice.IsCorrect);
+        
+        console.log(`Question ${answer.QuestionID}: Choice ${answer.ChoiceID} is ${isCorrect ? 'CORRECT' : 'WRONG'}`);
+
         // Create attempt answer với correct grading
         const attemptAnswer = manager.create(AttemptAnswer, {
           AttemptID: attemptId,
           QuestionID: answer.QuestionID,
           ChoiceID: answer.ChoiceID,
-          IsCorrect: selectedChoice.IsCorrect, // ✅ Đây là phần quan trọng
+          IsCorrect: isCorrect, // Use explicit boolean conversion
         });
 
         attemptAnswers.push(attemptAnswer);
@@ -202,7 +207,7 @@ export class AttemptRepository {
       // STEP 4: Calculate overall scores
       // ============================================================
       
-      const totalCorrect = attemptAnswers.filter(aa => aa.IsCorrect).length;
+      const totalCorrect = attemptAnswers.filter(aa => aa.IsCorrect === true).length;
       const totalQuestions = attemptAnswers.length;
       const scorePercent = totalQuestions > 0 
         ? Math.round((totalCorrect / totalQuestions) * 100)
