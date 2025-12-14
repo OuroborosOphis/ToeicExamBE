@@ -182,17 +182,30 @@ export class AttemptRepository {
           continue;
         }
 
-        // 🔥 FIX: Explicitly convert to boolean và log để debug
-        const isCorrect = Boolean(selectedChoice.IsCorrect);
+        // Find the correct choice for this question
+        const correctChoice = question.choices.find(c => c.IsCorrect === true);
+
+        if (!correctChoice) {
+          console.warn(
+            `⚠️ No correct choice found for question ${answer.QuestionID}`
+          );
+          continue;
+        }
+
+        // Compare student's choice ID with correct choice ID
+        const isCorrect = answer.ChoiceID === correctChoice.ID;
         
-        console.log(`Question ${answer.QuestionID}: Choice ${answer.ChoiceID} is ${isCorrect ? 'CORRECT' : 'WRONG'}`);
+        console.log(
+          `Question ${answer.QuestionID}: Student chose ${answer.ChoiceID} (${selectedChoice.Attribute}), ` +
+          `correct is ${correctChoice.ID} (${correctChoice.Attribute}) - ${isCorrect ? '✅ CORRECT' : '❌ WRONG'}`
+        );
 
         // Create attempt answer với correct grading
         const attemptAnswer = manager.create(AttemptAnswer, {
           AttemptID: attemptId,
           QuestionID: answer.QuestionID,
           ChoiceID: answer.ChoiceID,
-          IsCorrect: isCorrect, // Use explicit boolean conversion
+          IsCorrect: isCorrect,
         });
 
         attemptAnswers.push(attemptAnswer);
