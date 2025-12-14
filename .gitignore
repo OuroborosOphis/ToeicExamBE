@@ -36,3 +36,5 @@ coverage/
 # Lock files for package managers don't use
 yarn.lock
 pnpm-lock.yaml
+
+uploads/

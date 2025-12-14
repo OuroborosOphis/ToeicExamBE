@@ -17,6 +17,8 @@ import questionRoutes from './presentation/routes/question.routes';
 import commentRoutes from './presentation/routes/comment.routes';
 import mediaGroupRoutes from './presentation/routes/media-group.routes';
 import examTypeRoutes from './presentation/routes/exam-types.routes';
+import uploadRoutes from './presentation/routes/upload.route';
+import path from 'path/win32';
 
 /**
  * TOEIC Exam Practice Backend Server
@@ -158,6 +160,25 @@ function createApp(): Application {
   });
 
   // ============================================================
+  // STATIC FILE SERVING
+  // Serve uploaded files as static assets
+  // ============================================================
+  
+  /**
+   * Static file middleware để serve uploaded files
+   * 
+   * Khi frontend request http://localhost:3001/uploads/audio/file.mp3,
+   * Express sẽ serve file từ thư mục uploads/audio/
+   * 
+   * QUAN TRỌNG:
+   * - Middleware này phải đứng TRƯỚC các API routes
+   * - Nếu để sau routes, Express sẽ check routes trước và không bao giờ
+   *   đến được static file middleware
+   */
+  app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+  console.log('📁 Serving static files from /uploads');
+
+  // ============================================================
   // API ROUTES
   // All routes are prefixed with API_PREFIX (default: /api/exam)
   // ============================================================
@@ -175,6 +196,8 @@ function createApp(): Application {
    * This makes it easy to version the API later (e.g., /api/v2/exam)
    */
 
+  // Upload routes - Add this BEFORE other routes
+  app.use(`${API_PREFIX}/upload`, uploadRoutes);
   // Media group routes - Must come before exam routes to avoid conflicts
   app.use(`${API_PREFIX}/media-groups`, mediaGroupRoutes);
   app.use(`${API_PREFIX}/exams`, examRoutes);
