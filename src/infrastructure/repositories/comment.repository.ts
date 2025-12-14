@@ -66,6 +66,69 @@ export class CommentRepository {
   }
 
   /**
+   * Find all comments with filtering and pagination
+   * 
+   * @param options - Filtering and pagination options
+   * @returns Object with comments array and total count
+   */
+  async findAll(options: {
+    page: number;
+    limit: number;
+    examId?: number;
+    status?: number;
+    sortBy?: string;
+    order?: 'ASC' | 'DESC';
+  }): Promise<{ comments: Comment[]; total: number }> {
+    const {
+      page,
+      limit,
+      examId,
+      status = 1,
+      sortBy = 'CreateAt', // ⚠️ Use correct entity field name
+      order = 'DESC',
+    } = options;
+
+    const skip = (page - 1) * limit;
+
+    // Map sortBy to valid entity fields
+    const validSortFields: { [key: string]: string } = {
+      createdAt: 'comment.CreateAt',
+      updatedAt: 'comment.UpdateAt',
+      likes: 'comment.Likes', // If exists in entity
+    };
+
+    // Get the column name, default to CreateAt if invalid
+    const orderByColumn = validSortFields[sortBy] || 'comment.CreateAt';
+
+    // Build query builder
+    const queryBuilder = this.repository
+      .createQueryBuilder('comment')
+      .leftJoinAndSelect('comment.studentProfile', 'studentProfile')
+      .leftJoinAndSelect('studentProfile.user', 'user')
+      .leftJoinAndSelect('comment.exam', 'exam');
+
+    // Apply filters
+    if (examId) {
+      queryBuilder.andWhere('comment.ExamID = :examId', { examId });
+    }
+
+    if (status !== undefined) {
+      queryBuilder.andWhere('comment.Status = :status', { status });
+    }
+
+    // Apply sorting - use mapped column name with full alias
+    queryBuilder.orderBy(orderByColumn, order);
+
+    // Apply pagination
+    queryBuilder.skip(skip).take(limit);
+
+    // Get comments and total count
+    const [comments, total] = await queryBuilder.getManyAndCount();
+
+    return { comments, total };
+  }
+
+  /**
    * Find all comments for an exam with filtering
    * 
    * Returns comments for a specific exam, with options to:

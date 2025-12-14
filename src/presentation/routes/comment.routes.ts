@@ -84,6 +84,35 @@ router.post(
 );
 
 /**
+ * GET /api/exam/comments
+ * 
+ * Get all comments with optional filtering and pagination
+ * 
+ * Query params:
+ *   - page: Page number (default: 1)
+ *   - limit: Items per page (default: 20)
+ *   - examId: (optional) Filter by exam
+ *   - status: (optional) Filter by status (1=approved, 2=hidden, 3=flagged)
+ *   - sortBy: (optional) Sort field (createdAt, likes, etc.) - default: createdAt
+ *   - order: (optional) ASC or DESC - default: DESC
+ * 
+ * Requires: Authentication
+ * Returns paginated list of comments with pagination metadata
+ * 
+ * Useful for:
+ * - Dashboard showing all recent discussions
+ * - Moderation panel for admins
+ * - Analytics and reporting
+ * 
+ * Example: GET /api/exam/comments?page=2&limit=10&examId=5&order=DESC
+ */
+router.get(
+  '/',
+  authMiddleware,
+  commentController.getAll
+);
+
+/**
  * GET /api/exam/comments/:commentId/thread
  * 
  * Get complete comment thread with all nested replies

@@ -39,12 +39,14 @@ export class MediaDto {
 
   @IsString()
   @IsOptional()
-  @IsUrl()
+  // @IsUrl()
+  @IsUrl({ require_tld: false })
   AudioUrl?: string;
 
   @IsString()
   @IsOptional()
-  @IsUrl()
+  // @IsUrl()
+  @IsUrl({ require_tld: false })
   ImageUrl?: string;
 
   @IsString()

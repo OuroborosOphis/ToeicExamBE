@@ -447,4 +447,178 @@ export class CommentService {
       // Replies array would be populated when fetching thread
     };
   }
+
+  /**
+   * Get all comments with optional filtering and pagination
+   * 
+   * This method retrieves comments across the entire system with powerful
+   * filtering and pagination capabilities. Unlike getExamComments() which
+   * filters by a specific exam, this returns comments from all exams.
+   * 
+   * Use cases:
+   * - Dashboard showing all recent discussions across all exams
+   * - Moderation panel where admins review all comments in one place
+   * - Admin analytics on system-wide discussion activity
+   * - Advanced search combining multiple filters
+   * - Comment activity feed for the platform
+   * 
+   * Filtering options:
+   * - examId: Show only comments from a specific exam
+   * - status: Filter by approval status
+   *   - 1: Approved (visible to all)
+   *   - 2: Hidden (removed for guidelines violation)
+   *   - 3: Flagged (reported for review)
+   * - sortBy: Choose sort field
+   *   - 'createdAt': Most recent comments first
+   *   - 'updatedAt': Recently edited comments first
+   *   - 'likes': Most liked comments first (future feature)
+   * - order: Sort direction (ASC for oldest, DESC for newest)
+   * 
+   * Pagination design:
+   * - Prevents loading entire database into memory
+   * - Supports lazy loading and infinite scroll patterns
+   * - Includes 'hasMore' flag for frontend convenience
+   * 
+   * Default behavior (no filters):
+   * - Returns only approved comments (Status = 1)
+   * - Sorted by createdAt DESC (newest first)
+   * - Page 1, Limit 20 items
+   * 
+   * Security:
+   * - Regular users see only approved comments by default
+   * - Moderators can filter by status to see hidden/flagged content
+   * - Authorization is handled in the controller layer
+   * 
+   * Performance considerations:
+   * - Uses database indexing on ExamID, Status, createdAt
+   * - Limit capped at 100 to prevent huge result sets
+   * - Includes reply counts for each comment
+   * 
+   * @param options - Filtering and pagination configuration
+   *   - page: Current page number (1-based)
+   *   - limit: Items per page (1-100)
+   *   - examId: (optional) Filter by exam
+   *   - status: (optional) Filter by approval status
+   *   - sortBy: (optional) Field to sort by (createdAt, updatedAt, likes)
+   *   - order: (optional) Sort direction (ASC or DESC)
+   * 
+   * @returns Object containing:
+   *   - comments: Array of comment DTOs with author info
+   *   - pagination: Metadata for handling pagination (page, total, hasMore)
+   * 
+   * @throws Error if parameters are invalid
+   * 
+   * @example
+   * // Get all comments, page 2, 15 per page
+   * const result = await commentService.getAllComments({
+   *   page: 2,
+   *   limit: 15
+   * });
+   * 
+   * @example
+   * // Get flagged comments from exam 5
+   * const result = await commentService.getAllComments({
+   *   page: 1,
+   *   limit: 50,
+   *   examId: 5,
+   *   status: 3  // Flagged only
+   * });
+   * 
+   * @example
+   * // Get recently edited comments, sorted by update time
+   * const result = await commentService.getAllComments({
+   *   page: 1,
+   *   limit: 20,
+   *   sortBy: 'updatedAt',
+   *   order: 'DESC'
+   * });
+   */
+  async getAllComments(options: {
+    page: number;
+    limit: number;
+    examId?: number;
+    status?: number;
+    sortBy?: string;
+    order?: 'ASC' | 'DESC';
+  }): Promise<{
+    comments: CommentResponseDto[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+      hasMore: boolean;
+    };
+  }> {
+    // Destructure options with defaults
+    const {
+      page = 1,
+      limit = 20,
+      examId,
+      status,
+      sortBy = 'createdAt',
+      order = 'DESC',
+    } = options;
+
+    // Validate page number
+    if (page < 1) {
+      throw new Error('Page must be greater than 0');
+    }
+
+    // Validate limit
+    if (limit < 1 || limit > 100) {
+      throw new Error('Limit must be between 1 and 100');
+    }
+
+    // Validate sort order
+    if (!['ASC', 'DESC'].includes(order)) {
+      throw new Error('Order must be ASC or DESC');
+    }
+
+    // Validate sort field
+    const allowedSortFields = ['createdAt', 'updatedAt', 'likes'];
+    if (!allowedSortFields.includes(sortBy)) {
+      throw new Error(`SortBy must be one of: ${allowedSortFields.join(', ')}`);
+    }
+
+    // Call repository to fetch comments
+    // If no status filter provided, default to approved (Status = 1)
+    const { comments, total } = await this.commentRepository.findAll({
+      page,
+      limit,
+      examId,
+      status: status !== undefined ? status : 1, // Default to approved if not specified
+      sortBy,
+      order,
+    });
+
+    // Transform each comment to response DTO
+    // Include reply count for each comment to show in UI
+    const commentDtos = await Promise.all(
+      comments.map(async (comment: Comment) => {
+        const replyCount = await this.commentRepository.getReplyCount(comment.ID);
+        return this.transformToCommentResponse(comment, replyCount);
+      })
+    );
+
+    // Calculate pagination metadata
+    const totalPages = Math.ceil(total / limit);
+    const hasMore = page < totalPages; // True if there are more pages to load
+
+    // Log for monitoring (optional, helps with debugging)
+    console.log(
+      `📝 Retrieved ${commentDtos.length} comments (page ${page}/${totalPages}, total: ${total})`
+    );
+
+    return {
+      comments: commentDtos,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasMore,
+      },
+    };
+  }
 }

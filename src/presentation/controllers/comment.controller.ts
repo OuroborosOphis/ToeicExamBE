@@ -457,4 +457,111 @@ export class CommentController {
       data: { count },
     });
   });
+
+  /**
+   * Get all comments with optional filtering and pagination
+   * 
+   * GET /api/exam/comments
+   * 
+   * Query params:
+   *   - page: Page number (default: 1)
+   *   - limit: Items per page (default: 20)
+   *   - examId: (optional) Filter by specific exam
+   *   - status: (optional) Filter by approval status (1=approved, 2=hidden, 3=flagged)
+   *   - sortBy: (optional) Sort field (createdAt, updatedAt, likes) - default: createdAt
+   *   - order: (optional) ASC or DESC - default: DESC
+   * Requires: Authentication
+   * 
+   * This endpoint retrieves all comments across the entire system with
+   * powerful filtering and pagination capabilities.
+   * 
+   * Use cases:
+   * - Dashboard showing all recent comments
+   * - Moderation panel showing all comments for review
+   * - Admin analytics on discussion activity
+   * - Search results integration
+   * 
+   * By default, only approved comments (Status = 1) are returned.
+   * Admins/Teachers can use status filter to see hidden or flagged comments.
+   * 
+   * The response includes pagination metadata to help frontend handle
+   * large result sets:
+   * - page: Current page number
+   * - limit: Items per page
+   * - total: Total count of matching comments
+   * - totalPages: Number of pages
+   * - hasMore: Whether there are more pages to load
+   * 
+   * This is useful for lazy loading or infinite scroll implementations.
+   * 
+   * @param req - Authenticated request with optional query parameters
+   * @param res - Response object
+   */
+  getAll = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    // Extract and validate pagination parameters
+    const page = req.query.page ? parseInt(req.query.page as string) : 1;
+    const limit = req.query.limit ? parseInt(req.query.limit as string) : 20;
+
+    if (isNaN(page) || page < 1) {
+      res.status(400).json({
+        success: false,
+        message: 'Page must be a positive integer',
+        error: 'INVALID_PARAMETER',
+      });
+      return;
+    }
+
+    if (isNaN(limit) || limit < 1 || limit > 100) {
+      res.status(400).json({
+        success: false,
+        message: 'Limit must be between 1 and 100',
+        error: 'INVALID_PARAMETER',
+      });
+      return;
+    }
+
+    // Extract optional filter parameters
+    const examId = req.query.examId ? parseInt(req.query.examId as string) : undefined;
+    const status = req.query.status ? parseInt(req.query.status as string) : undefined;
+    const sortBy = (req.query.sortBy as string) || 'createdAt';
+    const order = (req.query.order as string) || 'DESC';
+
+    // Validate sort order
+    if (!['ASC', 'DESC'].includes(order.toUpperCase())) {
+      res.status(400).json({
+        success: false,
+        message: 'Order must be ASC or DESC',
+        error: 'INVALID_PARAMETER',
+      });
+      return;
+    }
+
+    // Validate sort field
+    const allowedSortFields = ['createdAt', 'updatedAt', 'likes'];
+    if (!allowedSortFields.includes(sortBy)) {
+      res.status(400).json({
+        success: false,
+        message: `SortBy must be one of: ${allowedSortFields.join(', ')}`,
+        error: 'INVALID_PARAMETER',
+      });
+      return;
+    }
+
+    // Call service with all parameters
+    const result = await this.commentService.getAllComments({
+      page,
+      limit,
+      examId,
+      status,
+      sortBy,
+      order: order.toUpperCase() as 'ASC' | 'DESC',
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Comments retrieved successfully',
+      data: result.comments,
+      pagination: result.pagination,
+    });
+  });
 }
