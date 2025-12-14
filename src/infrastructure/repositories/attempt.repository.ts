@@ -123,61 +123,165 @@ export class AttemptRepository {
       throw new Error('Attempt already submitted');
     }
 
+    console.log(`📝 Grading attempt ${attemptId} with ${answers.length} answers`);
+
     return await AppDataSource.transaction(async (manager) => {
-      // Create AttemptAnswer records and grade them
-      const attemptAnswers = await Promise.all(
-        answers.map(async (answer) => {
-          // Find the choice to check if it's correct
-          // Using Choice entity class instead of string for proper type inference
-          const choice = await manager.findOne(Choice, {
-            where: { ID: answer.ChoiceID },
-          });
+      // ============================================================
+      // STEP 1: Load ALL questions với mediaQuestion trong single query
+      // Điều này tránh N+1 problem và ensure relations được load đúng
+      // ============================================================
+      
+      const questionIds = answers.map(a => a.QuestionID);
+      
+      const questions = await manager
+        .createQueryBuilder(Question, 'question')
+        .leftJoinAndSelect('question.mediaQuestion', 'media')
+        .leftJoinAndSelect('question.choices', 'choices')
+        .where('question.ID IN (:...ids)', { ids: questionIds })
+        .getMany();
 
-          const attemptAnswer = manager.create(AttemptAnswer, {
-            AttemptID: attemptId,
-            QuestionID: answer.QuestionID,
-            ChoiceID: answer.ChoiceID,
-            IsCorrect: choice?.IsCorrect || false,
-          });
+      // Create a Map để lookup nhanh
+      const questionMap = new Map(questions.map(q => [q.ID, q]));
 
-          return attemptAnswer;
-        })
-      );
+      console.log(`📚 Loaded ${questions.length} questions with media info`);
+
+      // ============================================================
+      // STEP 2: Validate tất cả questions được tìm thấy
+      // ============================================================
+      
+      if (questions.length !== questionIds.length) {
+        const missingIds = questionIds.filter(id => !questionMap.has(id));
+        throw new Error(
+          `Some questions not found: ${missingIds.join(', ')}`
+        );
+      }
+
+      // ============================================================
+      // STEP 3: Grade từng answer và create AttemptAnswer records
+      // ============================================================
+      
+      const attemptAnswers: AttemptAnswer[] = [];
+
+      for (const answer of answers) {
+        const question = questionMap.get(answer.QuestionID);
+        
+        if (!question) {
+          console.warn(`⚠️ Question ${answer.QuestionID} not found, skipping`);
+          continue;
+        }
+
+        // Find student's selected choice
+        const selectedChoice = question.choices.find(
+          c => c.ID === answer.ChoiceID
+        );
+
+        if (!selectedChoice) {
+          console.warn(
+            `⚠️ Choice ${answer.ChoiceID} not found for question ${answer.QuestionID}`
+          );
+          continue;
+        }
+
+        // Create attempt answer với correct grading
+        const attemptAnswer = manager.create(AttemptAnswer, {
+          AttemptID: attemptId,
+          QuestionID: answer.QuestionID,
+          ChoiceID: answer.ChoiceID,
+          IsCorrect: selectedChoice.IsCorrect, // ✅ Đây là phần quan trọng
+        });
+
+        attemptAnswers.push(attemptAnswer);
+      }
 
       // Save all answers
-      await manager.save(attemptAnswers);
+      await manager.save(AttemptAnswer, attemptAnswers);
 
-      // Calculate scores
-      const totalCorrect = attemptAnswers.filter((aa) => aa.IsCorrect).length;
-      const totalQuestions = answers.length;
-      const scorePercent = Math.round((totalCorrect / totalQuestions) * 100);
+      console.log(`✅ Saved ${attemptAnswers.length} attempt answers`);
 
-      // Separate listening and reading questions
-      // This requires loading full question data with media
-      // Using Question entity class for proper type inference
-      const answersWithQuestions = await Promise.all(
-        attemptAnswers.map(async (aa) => {
-          const question = await manager.findOne(Question, {
-            where: { ID: aa.QuestionID },
-            relations: ['mediaQuestion'],
-          });
-          return { ...aa, question };
-        })
+      // ============================================================
+      // STEP 4: Calculate overall scores
+      // ============================================================
+      
+      const totalCorrect = attemptAnswers.filter(aa => aa.IsCorrect).length;
+      const totalQuestions = attemptAnswers.length;
+      const scorePercent = totalQuestions > 0 
+        ? Math.round((totalCorrect / totalQuestions) * 100)
+        : 0;
+
+      console.log(
+        `📊 Overall: ${totalCorrect}/${totalQuestions} correct (${scorePercent}%)`
       );
 
-      const listeningAnswers = answersWithQuestions.filter(
-        (aa) => aa.question?.mediaQuestion?.Skill === 'LISTENING'
+      // ============================================================
+      // STEP 5: Separate listening và reading questions - FIXED
+      // Sử dụng questionMap thay vì query lại
+      // ============================================================
+      
+      const listeningAnswers: AttemptAnswer[] = [];
+      const readingAnswers: AttemptAnswer[] = [];
+      const unknownSkillAnswers: AttemptAnswer[] = [];
+
+      for (const aa of attemptAnswers) {
+        const question = questionMap.get(aa.QuestionID);
+        
+        if (!question || !question.mediaQuestion) {
+          console.warn(
+            `⚠️ No media info for question ${aa.QuestionID}, treating as unknown skill`
+          );
+          unknownSkillAnswers.push(aa);
+          continue;
+        }
+
+        const skill = question.mediaQuestion.Skill;
+
+        if (skill === 'LISTENING') {
+          listeningAnswers.push(aa);
+        } else if (skill === 'READING') {
+          readingAnswers.push(aa);
+        } else {
+          console.warn(
+            `⚠️ Unknown skill "${skill}" for question ${aa.QuestionID}`
+          );
+          unknownSkillAnswers.push(aa);
+        }
+      }
+
+      console.log(`🎧 Listening questions: ${listeningAnswers.length}`);
+      console.log(`📖 Reading questions: ${readingAnswers.length}`);
+      if (unknownSkillAnswers.length > 0) {
+        console.log(`❓ Unknown skill questions: ${unknownSkillAnswers.length}`);
+      }
+
+      // ============================================================
+      // STEP 6: Validate separation results
+      // ============================================================
+      
+      const totalCategorized = listeningAnswers.length + 
+                              readingAnswers.length + 
+                              unknownSkillAnswers.length;
+      
+      if (totalCategorized !== attemptAnswers.length) {
+        console.error(
+          `❌ Categorization mismatch: ${totalCategorized} vs ${attemptAnswers.length}`
+        );
+        throw new Error('Failed to categorize all questions by skill');
+      }
+
+      // ============================================================
+      // STEP 7: Calculate section scores
+      // ============================================================
+      
+      const listeningCorrect = listeningAnswers.filter(aa => aa.IsCorrect).length;
+      const readingCorrect = readingAnswers.filter(aa => aa.IsCorrect).length;
+
+      console.log(
+        `🎧 Listening: ${listeningCorrect}/${listeningAnswers.length} correct`
       );
-      const readingAnswers = answersWithQuestions.filter(
-        (aa) => aa.question?.mediaQuestion?.Skill === 'READING'
+      console.log(
+        `📖 Reading: ${readingCorrect}/${readingAnswers.length} correct`
       );
 
-      const listeningCorrect = listeningAnswers.filter((aa) => aa.IsCorrect).length;
-      const readingCorrect = readingAnswers.filter((aa) => aa.IsCorrect).length;
-
-      // Convert to TOEIC scale (0-495 for each section)
-      // This is a simplified conversion. Real TOEIC uses complex scaled scoring.
-      // You should replace this with actual TOEIC conversion tables.
+      // Convert to TOEIC scale (0-495 mỗi section)
       const scoreListening = this.convertToToeicScale(
         listeningCorrect,
         listeningAnswers.length
@@ -187,7 +291,14 @@ export class AttemptRepository {
         readingAnswers.length
       );
 
-      // Update attempt with scores and submission time
+      console.log(`🎯 TOEIC Listening Score: ${scoreListening}/495`);
+      console.log(`🎯 TOEIC Reading Score: ${scoreReading}/495`);
+      console.log(`🎯 Total TOEIC Score: ${scoreListening + scoreReading}/990`);
+
+      // ============================================================
+      // STEP 8: Update attempt với calculated scores
+      // ============================================================
+      
       await manager.update(Attempt, attemptId, {
         SubmittedAt: new Date(),
         ScorePercent: scorePercent,
@@ -195,8 +306,11 @@ export class AttemptRepository {
         ScoreReading: scoreReading,
       });
 
-      // Return complete graded attempt
-      return await manager.findOne(Attempt, {
+      // ============================================================
+      // STEP 9: Return complete graded attempt
+      // ============================================================
+      
+      const gradedAttempt = await manager.findOne(Attempt, {
         where: { ID: attemptId },
         relations: [
           'exam',
@@ -206,7 +320,15 @@ export class AttemptRepository {
           'attemptAnswers.question.choices',
           'attemptAnswers.choice',
         ],
-      }) as Attempt;
+      });
+
+      if (!gradedAttempt) {
+        throw new Error('Failed to retrieve graded attempt');
+      }
+
+      console.log(`✅ Successfully graded attempt ${attemptId}`);
+
+      return gradedAttempt;
     });
   }
 
