@@ -1173,6 +1173,7 @@ export class ExamService {
                 Section: eq.question.mediaQuestion.Section || '',
                 AudioUrl: eq.question.mediaQuestion.AudioUrl,
                 ImageUrl: eq.question.mediaQuestion.ImageUrl,
+                Script: eq.question.mediaQuestion.Scirpt || '',
               },
             }))
         : [],

@@ -208,6 +208,7 @@ export class QuestionDetailDto {
     Section: string;
     AudioUrl?: string;
     ImageUrl?: string;
+    Script?: string;
   };
 }
 
