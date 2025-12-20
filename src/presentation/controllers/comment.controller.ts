@@ -240,8 +240,13 @@ export class CommentController {
       return;
     }
 
-    const studentProfileId = getStudentProfileId(req);
     const isAdmin = req.user?.role === 'ADMIN' || req.user?.role === 'TEACHER';
+    let studentProfileId = 0;
+
+    // Chỉ lấy studentProfileId nếu không phải admin
+    if (!isAdmin) {
+      studentProfileId = getStudentProfileId(req);
+    }
 
     const deleted = await this.commentService.deleteComment(
       commentId,
