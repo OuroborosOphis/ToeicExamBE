@@ -5,6 +5,11 @@ import { AttemptAnswer } from '../../domain/entities/attempt-answer.entity';
 import { Choice } from '../../domain/entities/choice.entity';
 import { Question } from '../../domain/entities/question.entity';
 import { MediaQuestion } from '../../domain/entities/media-question.entity';
+import { 
+  convertListeningScore, 
+  convertReadingScore,
+  calculateToeicScores 
+} from '../../utils/toeic-score-conversion';
 
 /**
  * AttemptRepository handles all database operations for test attempts
@@ -91,16 +96,17 @@ export class AttemptRepository {
   }
 
   /**
-   * Submit answers for an attempt
+   * Submit answers for an attempt với TOEIC scoring
    * 
-   * This is the core grading method that:
-   * 1. Validates the attempt exists and hasn't been submitted
-   * 2. Checks time limit hasn't been exceeded
-   * 3. Creates AttemptAnswer records for each answer
-   * 4. Grades each answer by comparing with correct choice
-   * 5. Calculates section scores (Listening/Reading)
-   * 6. Converts raw scores to TOEIC scale (0-495 each)
-   * 7. Updates attempt with final scores and submission time
+   * THAY ĐỔI CHÍNH:
+   * Thay vì tính điểm theo công thức đơn giản (percentage * 495),
+   * chúng ta sử dụng bảng conversion chính thức của TOEIC.
+   * 
+   * Quy trình:
+   * 1. Grade từng câu trả lời (đúng/sai)
+   * 2. Đếm số câu đúng cho Listening và Reading
+   * 3. Tra cứu điểm từ bảng conversion TOEIC
+   * 4. Lưu điểm vào database
    * 
    * This entire operation is wrapped in a transaction to ensure
    * data integrity. If any step fails, everything is rolled back.
@@ -237,16 +243,14 @@ export class AttemptRepository {
       
       const listeningAnswers: AttemptAnswer[] = [];
       const readingAnswers: AttemptAnswer[] = [];
-      const unknownSkillAnswers: AttemptAnswer[] = [];
 
       for (const aa of attemptAnswers) {
         const question = questionMap.get(aa.QuestionID);
         
         if (!question || !question.mediaQuestion) {
           console.warn(
-            `⚠️ No media info for question ${aa.QuestionID}, treating as unknown skill`
+            `⚠️ No media info for question ${aa.QuestionID}, skipping`
           );
-          unknownSkillAnswers.push(aa);
           continue;
         }
 
@@ -260,35 +264,13 @@ export class AttemptRepository {
           console.warn(
             `⚠️ Unknown skill "${skill}" for question ${aa.QuestionID}`
           );
-          unknownSkillAnswers.push(aa);
         }
       }
 
       console.log(`🎧 Listening questions: ${listeningAnswers.length}`);
       console.log(`📖 Reading questions: ${readingAnswers.length}`);
-      if (unknownSkillAnswers.length > 0) {
-        console.log(`❓ Unknown skill questions: ${unknownSkillAnswers.length}`);
-      }
 
-      // ============================================================
-      // STEP 6: Validate separation results
-      // ============================================================
-      
-      const totalCategorized = listeningAnswers.length + 
-                              readingAnswers.length + 
-                              unknownSkillAnswers.length;
-      
-      if (totalCategorized !== attemptAnswers.length) {
-        console.error(
-          `❌ Categorization mismatch: ${totalCategorized} vs ${attemptAnswers.length}`
-        );
-        throw new Error('Failed to categorize all questions by skill');
-      }
-
-      // ============================================================
-      // STEP 7: Calculate section scores
-      // ============================================================
-      
+      // STEP 6: Count correct answers per section
       const listeningCorrect = listeningAnswers.filter(aa => aa.IsCorrect).length;
       const readingCorrect = readingAnswers.filter(aa => aa.IsCorrect).length;
 
@@ -299,24 +281,18 @@ export class AttemptRepository {
         `📖 Reading: ${readingCorrect}/${readingAnswers.length} correct`
       );
 
-      // Convert to TOEIC scale (0-495 mỗi section)
-      const scoreListening = this.convertToToeicScale(
-        listeningCorrect,
-        listeningAnswers.length
-      );
-      const scoreReading = this.convertToToeicScale(
-        readingCorrect,
-        readingAnswers.length
-      );
+      // ✨ STEP 7: SỬ DỤNG BẢNG CONVERSION TOEIC
+      // Đây là thay đổi quan trọng nhất!
+      // Thay vì công thức đơn giản, chúng ta tra cứu từ bảng conversion
+      
+      const scoreListening = convertListeningScore(listeningCorrect);
+      const scoreReading = convertReadingScore(readingCorrect);
 
-      console.log(`🎯 TOEIC Listening Score: ${scoreListening}/495`);
-      console.log(`🎯 TOEIC Reading Score: ${scoreReading}/495`);
+      console.log(`🎯 TOEIC Listening Score: ${scoreListening}/495 (from ${listeningCorrect} correct)`);
+      console.log(`🎯 TOEIC Reading Score: ${scoreReading}/495 (from ${readingCorrect} correct)`);
       console.log(`🎯 Total TOEIC Score: ${scoreListening + scoreReading}/990`);
 
-      // ============================================================
       // STEP 8: Update attempt với calculated scores
-      // ============================================================
-      
       await manager.update(Attempt, attemptId, {
         SubmittedAt: new Date(),
         ScorePercent: scorePercent,
@@ -324,10 +300,7 @@ export class AttemptRepository {
         ScoreReading: scoreReading,
       });
 
-      // ============================================================
       // STEP 9: Return complete graded attempt
-      // ============================================================
-      
       const gradedAttempt = await manager.findOne(Attempt, {
         where: { ID: attemptId },
         relations: [
