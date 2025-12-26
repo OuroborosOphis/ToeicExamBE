@@ -281,16 +281,41 @@ export class AttemptRepository {
         `📖 Reading: ${readingCorrect}/${readingAnswers.length} correct`
       );
 
-      // ✨ STEP 7: SỬ DỤNG BẢNG CONVERSION TOEIC
-      // Đây là thay đổi quan trọng nhất!
-      // Thay vì công thức đơn giản, chúng ta tra cứu từ bảng conversion
+      // ✨ STEP 7: TÍNH ĐIỂM DỰA THEO LOẠI BÀI THI
+      // - FULL_TEST: Dùng bảng conversion TOEIC chính thức
+      // - PRACTICE_BY_PART: Dùng công thức tỷ lệ đơn giản
       
-      const scoreListening = convertListeningScore(listeningCorrect);
-      const scoreReading = convertReadingScore(readingCorrect);
+      let scoreListening: number;
+      let scoreReading: number;
 
-      console.log(`🎯 TOEIC Listening Score: ${scoreListening}/495 (from ${listeningCorrect} correct)`);
-      console.log(`🎯 TOEIC Reading Score: ${scoreReading}/495 (from ${readingCorrect} correct)`);
-      console.log(`🎯 Total TOEIC Score: ${scoreListening + scoreReading}/990`);
+      if (attempt.Type === 'FULL_TEST') {
+        // ✅ Full Test: Dùng bảng conversion TOEIC
+        console.log('📊 Using TOEIC conversion table for FULL_TEST');
+        
+        scoreListening = convertListeningScore(listeningCorrect);
+        scoreReading = convertReadingScore(readingCorrect);
+
+        console.log(`🎯 TOEIC Listening: ${listeningCorrect}/100 correct → ${scoreListening}/495`);
+        console.log(`🎯 TOEIC Reading: ${readingCorrect}/100 correct → ${scoreReading}/495`);
+        console.log(`🎯 Total TOEIC Score: ${scoreListening + scoreReading}/990`);
+        
+      } else {
+        // ✅ Practice: Dùng công thức tỷ lệ
+        console.log('📊 Using percentage-based scoring for PRACTICE_BY_PART');
+        
+        // Tính điểm theo tỷ lệ (linear scaling)
+        scoreListening = listeningAnswers.length > 0
+          ? Math.round((listeningCorrect / listeningAnswers.length) * 100)
+          : 0;
+          
+        scoreReading = readingAnswers.length > 0
+          ? Math.round((readingCorrect / readingAnswers.length) * 100)
+          : 0;
+
+        console.log(`🎯 Practice Listening: ${listeningCorrect}/${listeningAnswers.length} → ${scoreListening}/495`);
+        console.log(`🎯 Practice Reading: ${readingCorrect}/${readingAnswers.length} → ${scoreReading}/495`);
+        console.log(`🎯 Total Practice Score: ${scoreListening + scoreReading}/990`);
+      }
 
       // STEP 8: Update attempt với calculated scores
       await manager.update(Attempt, attemptId, {
