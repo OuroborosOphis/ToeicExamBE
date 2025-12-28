@@ -236,6 +236,7 @@ export class QuestionService {
           }
         : undefined,
       updateData.Choices?.map((choice) => ({
+        ID: choice.ID, // Truyền ID để repository biết cần update hay create
         Content: choice.Content,
         Attribute: choice.Attribute,
         IsCorrect: choice.IsCorrect,

@@ -193,10 +193,17 @@ export class QuestionRepository {
    * 
    * Uses transaction to ensure all updates succeed together.
    * 
+   * IMPORTANT: Choice updates use upsert logic:
+   * - Choices with ID in payload: update those choices
+   * - Choices without ID in payload: create new choices
+   * - Choices in DB but not in payload:
+   *   - If not referenced by any attemptanswer: delete
+   *   - If referenced by attemptanswer: keep (don't delete FK constraint)
+   * 
    * @param id - Question ID to update
    * @param questionData - Updated question data
    * @param mediaData - Updated media data
-   * @param choicesData - Updated choices data
+   * @param choicesData - Updated choices data (with optional IDs)
    * @returns Updated question with all relations
    */
   async update(
@@ -222,19 +229,62 @@ export class QuestionRepository {
         await manager.update(MediaQuestion, question.MediaQuestionID, mediaData);
       }
 
-      // Update choices if provided
+      // Update choices if provided - using upsert logic
       if (choicesData) {
-        // Delete existing choices
-        await manager.delete(Choice, { QuestionID: id });
-        
-        // Create new choices
-        const newChoices = choicesData.map((choiceData) =>
-          manager.create(Choice, {
-            ...choiceData,
-            QuestionID: id,
-          })
-        );
-        await manager.save(newChoices);
+        // Load current choices for this question
+        const existingChoices = await manager.find(Choice, {
+          where: { QuestionID: id },
+        });
+
+        const existingChoiceMap = new Map(existingChoices.map(c => [c.ID, c]));
+        const payloadIds = new Set<number>();
+
+        // Process choices from payload
+        for (const choicePayload of choicesData) {
+          if (choicePayload.ID) {
+            // Update existing choice
+            payloadIds.add(choicePayload.ID);
+            await manager.update(
+              Choice,
+              choicePayload.ID,
+              {
+                Attribute: choicePayload.Attribute,
+                Content: choicePayload.Content,
+                IsCorrect: choicePayload.IsCorrect,
+              }
+            );
+          } else {
+            // Create new choice (no ID provided)
+            const newChoice = manager.create(Choice, {
+              ...choicePayload,
+              QuestionID: id,
+            });
+            await manager.save(newChoice);
+          }
+        }
+
+        // Handle choices in DB but not in payload
+        // Only delete if not referenced by attemptanswer (no FK constraint)
+        for (const [choiceId, existingChoice] of existingChoiceMap) {
+          if (!payloadIds.has(choiceId)) {
+            // Check if this choice is referenced by any attemptanswer
+            const referenceCount = await manager.count('AttemptAnswer' as any, {
+              where: { ChoiceID: choiceId },
+            } as any);
+
+            if (referenceCount === 0) {
+              // Safe to delete - not referenced
+              await manager.delete(Choice, choiceId);
+              console.log(`Deleted unreferenced choice ${choiceId}`);
+            } else {
+              // Keep the choice - it's referenced by attempt answers
+              console.warn(
+                `⚠️ Keeping choice ${choiceId} because it's referenced by ${referenceCount} attempt answer(s). ` +
+                `To fully remove it, delete those attempt answers first.`
+              );
+            }
+          }
+        }
       }
 
       // Return updated question

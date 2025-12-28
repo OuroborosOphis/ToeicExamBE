@@ -53,6 +53,11 @@ export class MediaQuestionDto {
 /**
  * DTO for answer choice
  * 
+ * For creating new questions: omit ID (will be auto-generated)
+ * For updating existing questions:
+ *   - Include ID if updating an existing choice
+ *   - Omit ID if creating a new choice
+ * 
  * Each choice needs:
  * - Attribute: The choice letter (A, B, C, or D)
  * - Content: The actual answer text
@@ -64,6 +69,10 @@ export class MediaQuestionDto {
  * - Content is not empty
  */
 export class ChoiceDto {
+  @IsInt()
+  @IsOptional()
+  ID?: number; // Present when updating existing choice, absent when creating new
+
   @IsString()
   @IsNotEmpty({ message: 'Choice attribute is required' })
   Attribute: string;
@@ -112,6 +121,11 @@ export class CreateQuestionDto {
  * - Fix a typo in question text without touching choices
  * - Update audio URL without changing anything else
  * - Add or modify choices
+ * 
+ * When updating choices:
+ * - Choices with ID: will be updated
+ * - Choices without ID: will be created as new
+ * - Choices not in the list: will be soft-kept (not deleted if referenced by attempts)
  */
 export class UpdateQuestionDto {
   @IsString()

@@ -31,13 +31,89 @@ export interface AuthenticatedRequest extends Request {
  * Coordinate with your teammates to ensure consistency!
  */
 interface JwtPayload {
+  // Format 1: Node.js backend
+  userId?: number;
+  email?: string;
+  studentProfileId?: number;
+  teacherProfileId?: number;
+  
+  // Format 2: Spring Boot backend
+  // Quan trọng: 'id' trong Spring Boot token = studentProfileId hoặc teacherProfileId
+  // tùy thuộc vào role
+  id?: number;
+  sub?: string;
+  
+  // Common fields
+  role: string;
+  iat?: number; // Issued at timestamp
+  exp?: number; // Expiration timestamp
+}
+
+/**
+ * Normalize token payload to consistent format
+ * Hàm này chuyển đổi các format token khác nhau về cùng 1 cấu trúc
+ * 
+ * Token Format 1 (Node.js):
+ * { userId: 3, email: "...", role: "STUDENT", studentProfileId: 1 }
+ * 
+ * Token Format 2 (Spring Boot):
+ * { id: 10, sub: "...", role: "STUDENT" }
+ * Lưu ý: 'id' trong token Spring Boot = studentProfileId (nếu STUDENT)
+ *                                      = teacherProfileId (nếu TEACHER)
+ */
+function normalizeTokenPayload(decoded: JwtPayload): {
   userId: number;
   email: string;
   role: string;
   studentProfileId?: number;
   teacherProfileId?: number;
-  iat?: number; // Issued at timestamp
-  exp?: number; // Expiration timestamp
+} | null {
+  const role = decoded.role;
+  
+  // Validate role exists
+  if (!role) {
+    return null;
+  }
+
+  // Extract email (có thể là "email" hoặc "sub")
+  const email = decoded.email || decoded.sub;
+  
+  if (!email) {
+    return null;
+  }
+
+  // Case 1: Token format 1 (Node.js) - có đầy đủ các field
+  if (decoded.userId) {
+    return {
+      userId: decoded.userId,
+      email,
+      role,
+      studentProfileId: decoded.studentProfileId,
+      teacherProfileId: decoded.teacherProfileId,
+    };
+  }
+
+  // Case 2: Token format 2 (Spring Boot)
+  // 'id' trong token = studentProfileId hoặc teacherProfileId tùy role
+  if (decoded.id) {
+    const result: any = {
+      userId: decoded.id, // Tạm dùng id làm userId
+      email,
+      role,
+    };
+
+    // Map 'id' field dựa trên role
+    if (role === 'STUDENT') {
+      result.studentProfileId = decoded.id;
+    } else if (role === 'TEACHER') {
+      result.teacherProfileId = decoded.id;
+    }
+
+    return result;
+  }
+
+  // Không có userId hay id -> token invalid
+  return null;
 }
 
 /**
@@ -125,32 +201,38 @@ export const authMiddleware = (
     // - Signature is invalid (token was tampered with)
     // - Token has expired
     // - Token format is invalid
-    const decoded = jwt.verify(token, jwtSecret) as JwtPayload;
+    // Verify token với các thuật toán khác nhau
+    let decoded: JwtPayload;
+    
+    try {
+      // Thử verify với HS256 trước (token 1)
+      decoded = jwt.verify(token, jwtSecret, { algorithms: ['HS256'] }) as JwtPayload;
+    } catch (hs256Error) {
+      try {
+        // Nếu fail, thử HS512 (token 2)
+        decoded = jwt.verify(token, jwtSecret, { algorithms: ['HS512'] }) as JwtPayload;
+      } catch (hs512Error) {
+        // Nếu cả 2 đều fail, throw error
+        throw hs256Error;
+      }
+    }
 
-    // Validate that decoded token contains required fields
-    if (!decoded.userId || !decoded.email || !decoded.role) {
+    // Normalize payload về format thống nhất
+    const normalizedUser = normalizeTokenPayload(decoded);
+
+    if (!normalizedUser) {
       res.status(401).json({
         success: false,
-        message: 'Invalid token payload',
+        message: 'Invalid token payload - missing required fields (userId/id, email/sub, role)',
         error: 'UNAUTHORIZED',
       });
       return;
     }
 
-    // Attach user information to request object
-    // This makes user info available to all downstream handlers
-    // Controllers can now access req.user to know who made the request
-    req.user = {
-      userId: decoded.userId,
-      email: decoded.email,
-      role: decoded.role,
-      studentProfileId: decoded.studentProfileId,
-      teacherProfileId: decoded.teacherProfileId,
-    };
+    // Attach normalized user info to request
+    req.user = normalizedUser;
 
-    // Log successful authentication (useful for debugging and monitoring)
-    // In production, you might want more sophisticated logging
-    console.log(`Authenticated user: ${decoded.email} (role: ${decoded.role})`);
+    console.log(`Authenticated user: ${normalizedUser.email} (role: ${normalizedUser.role})`);
 
     // Pass control to next middleware or controller
     next();
@@ -230,16 +312,24 @@ export const optionalAuthMiddleware = (
     }
 
     // Try to verify token, but don't fail if it's invalid
-    const decoded = jwt.verify(token, jwtSecret) as JwtPayload;
+    let decoded: JwtPayload;
+    
+    try {
+      decoded = jwt.verify(token, jwtSecret, { algorithms: ['HS256'] }) as JwtPayload;
+    } catch (hs256Error) {
+      try {
+        decoded = jwt.verify(token, jwtSecret, { algorithms: ['HS512'] }) as JwtPayload;
+      } catch (hs512Error) {
+        // Invalid token, just continue without user
+        next();
+        return;
+      }
+    }
 
-    if (decoded.userId && decoded.email && decoded.role) {
-      req.user = {
-        userId: decoded.userId,
-        email: decoded.email,
-        role: decoded.role,
-        studentProfileId: decoded.studentProfileId,
-        teacherProfileId: decoded.teacherProfileId,
-      };
+    const normalizedUser = normalizeTokenPayload(decoded);
+    
+    if (normalizedUser) { 
+      req.user = normalizedUser;
     }
 
     next();
