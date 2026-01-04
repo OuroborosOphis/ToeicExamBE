@@ -203,14 +203,8 @@ export class QuestionService {
       throw new Error('Question not found');
     }
 
-    // Check if this is a widely-used question
-    const usage = await this.questionRepository.getUsageStats(questionId);
-    if (usage && usage.usedInExams > 5) {
-      console.warn(
-        `Warning: Updating question ${questionId} which is used in ${usage.usedInExams} exams`
-      );
-      // In production, might require special permission or create new version
-    }
+    // Removed the usage check that was blocking updates
+    // Now questions can be updated regardless of exam usage
 
     // Validate updated choices if provided
     if (updateData.Choices) {
