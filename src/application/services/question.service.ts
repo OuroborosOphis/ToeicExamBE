@@ -55,7 +55,7 @@ export class QuestionService {
    * @returns Created question with all relations
    * @throws Error if validation fails
    */
-  async createQuestion(
+    async createQuestion(
     questionData: CreateQuestionDto,
     userId: number
   ): Promise<Question> {
@@ -65,11 +65,19 @@ export class QuestionService {
     // Validate media requirements based on skill type
     this.validateMediaRequirements(questionData.Media);
 
+    // Validate ShowTime format if provided
+    if (questionData.ShowTime) {
+      this.validateTimeFormat(questionData.ShowTime);
+    }
+
     // Create the complete question through repository
     const question = await this.questionRepository.create(
       {
         QuestionText: questionData.QuestionText,
         UserID: userId,
+        Explain: questionData.Explain,
+        ShowTime: questionData.ShowTime,
+        OrderInGroup: questionData.OrderInGroup || 1,
       },
       {
         Skill: questionData.Media.Skill,
@@ -192,7 +200,7 @@ export class QuestionService {
    * @returns Updated question
    * @throws Error if question not found or validation fails
    */
-  async updateQuestion(
+    async updateQuestion(
     questionId: number,
     updateData: UpdateQuestionDto,
     userId: number
@@ -216,9 +224,21 @@ export class QuestionService {
       this.validateMediaRequirements(updateData.Media);
     }
 
+    // Validate ShowTime format if provided
+    if (updateData.ShowTime) {
+      this.validateTimeFormat(updateData.ShowTime);
+    }
+
     const updatedQuestion = await this.questionRepository.update(
       questionId,
-      updateData.QuestionText ? { QuestionText: updateData.QuestionText } : undefined,
+      updateData.QuestionText 
+        ? { QuestionText: updateData.QuestionText } 
+        : {
+            QuestionText: existingQuestion.QuestionText,
+            Explain: updateData.Explain !== undefined ? updateData.Explain : existingQuestion.Explain,
+            ShowTime: updateData.ShowTime !== undefined ? updateData.ShowTime : existingQuestion.ShowTime,
+            OrderInGroup: updateData.OrderInGroup !== undefined ? updateData.OrderInGroup : existingQuestion.OrderInGroup,
+          },
       updateData.Media
         ? {
             Skill: updateData.Media.Skill,
@@ -230,7 +250,7 @@ export class QuestionService {
           }
         : undefined,
       updateData.Choices?.map((choice) => ({
-        ID: choice.ID, // Truyền ID để repository biết cần update hay create
+        ID: choice.ID,
         Content: choice.Content,
         Attribute: choice.Attribute,
         IsCorrect: choice.IsCorrect,
@@ -463,6 +483,23 @@ export class QuestionService {
     }
   }
 
+    /**
+   * Validate time format (HH:MM:SS)
+   * 
+   * ShowTime field is used to specify when a question should be displayed,
+   * typically in listening sections where questions appear at specific
+   * points in the audio.
+   * 
+   * @param timeStr - Time string to validate
+   * @throws Error if format is invalid
+   */
+  private validateTimeFormat(timeStr: string): void {
+    const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/;
+    if (!timeRegex.test(timeStr)) {
+      throw new Error('ShowTime must be in HH:MM:SS format (e.g., 00:01:30)');
+    }
+  }
+
   /**
    * Check if string is a valid URL
    * 
@@ -491,13 +528,16 @@ export class QuestionService {
    * @param usageCount - Number of exams using this question
    * @returns Formatted response DTO
    */
-  private transformToQuestionListResponse(
+    private transformToQuestionListResponse(
     question: Question,
     usageCount: number
   ): QuestionListResponseDto {
     return {
       ID: question.ID,
       QuestionText: question.QuestionText || '',
+      Explain: question.Explain,
+      ShowTime: question.ShowTime,
+      OrderInGroup: question.OrderInGroup,
       Media: {
         Skill: question.mediaQuestion.Skill || '',
         Type: question.mediaQuestion.Type,

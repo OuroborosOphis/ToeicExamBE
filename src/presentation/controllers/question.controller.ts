@@ -26,7 +26,7 @@ export class QuestionController {
     this.questionService = new QuestionService();
   }
 
-  /**
+   /**
    * Create a new question
    * 
    * POST /api/exam/questions
@@ -35,10 +35,13 @@ export class QuestionController {
    *   - QuestionText: The question stem
    *   - Media: Audio/image URLs, scripts
    *   - Choices: Array of answer options with one marked correct
+   *   - Explain (optional): Explanation of the correct answer
+   *   - ShowTime (optional): Time code when question appears (HH:MM:SS)
+   *   - OrderInGroup (optional): Position in question group (default: 1)
    * Requires: Authentication, Teacher or Admin role
    * 
    * This endpoint creates a complete question with all its components
-   * (question text, media, and choices) in a single transaction.
+   * (question text, media, choices, and optional explanation/timing).
    * 
    * The validation middleware ensures all required data is present and
    * properly formatted before reaching this controller.
@@ -98,7 +101,7 @@ export class QuestionController {
     });
   });
 
-  /**
+    /**
    * Search and filter questions
    * 
    * GET /api/exam/questions
@@ -115,8 +118,8 @@ export class QuestionController {
    * teachers and admins to browse, search, and filter questions when
    * building exams or managing content.
    * 
-   * Results are paginated for performance with potentially thousands
-   * of questions in the database.
+   * Results include question explanations and are paginated for performance
+   * with potentially thousands of questions in the database.
    * 
    * @param req - Authenticated request with query filters
    * @param res - Response object
@@ -134,20 +137,25 @@ export class QuestionController {
     });
   });
 
-  /**
+    /**
    * Update an existing question
    * 
    * PUT /api/exam/questions/:id
    * 
    * Path params: id (question ID)
    * Request body: UpdateQuestionDto (validated by middleware)
+   *   - QuestionText (optional): Update question text
+   *   - Media (optional): Update media URLs/scripts
+   *   - Explain (optional): Update explanation of correct answer
+   *   - ShowTime (optional): Update display timing (HH:MM:SS)
+   *   - OrderInGroup (optional): Update position in group
+   *   - Choices (optional): Update answer choices
    * Requires: Authentication, Teacher or Admin role
    * 
-   * This allows updating any aspect of a question: text, media, or choices.
+   * This allows updating any aspect of a question: text, media, choices,
+   * explanation, or timing information.
    * 
-   * Important: Updating a question affects all exams that use it. The
-   * service logs a warning if the question is widely used, but in
-   * production you might want stricter controls.
+   * Important: Updating a question affects all exams that use it.
    * 
    * @param req - Authenticated request with question ID and UpdateQuestionDto
    * @param res - Response object

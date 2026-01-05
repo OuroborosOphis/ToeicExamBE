@@ -10,6 +10,7 @@ import { MediaQuestion } from './media-question.entity';
 import { ExamQuestion } from './exam-question.entity';
 import { Choice } from './choice.entity';
 import { AttemptAnswer } from './attempt-answer.entity';
+import { Exam } from './exam.entity';
 
 /**
  * Question Entity represents an individual test question
@@ -20,6 +21,9 @@ import { AttemptAnswer } from './attempt-answer.entity';
  * - Questions have multiple choices, one of which is correct
  * - QuestionText contains the actual question stem/prompt
  * - UserID tracks who created this question (for admin/teacher management)
+ * - Explain field provides explanation for the correct answer (for learning)
+ * - ShowTime indicates when question should be displayed (for time-based presentations)
+ * - OrderInGroup tracks position within a question group
  */
 @Entity('question')
 export class Question {
@@ -43,13 +47,57 @@ export class Question {
   UserID: number;
 
   /**
+   * Foreign key to Exercise (optional)
+   * Links question to an exercise/section if applicable
+   */
+  @Column({ type: 'int', nullable: true })
+  ExerciseID: number;
+
+  /**
+   * Foreign key to Exam (optional)
+   * Direct reference to exam if question is specific to one exam
+   * Note: Questions can also be reused via ExamQuestion junction table
+   */
+  @Column({ type: 'int', nullable: true })
+  ExamID: number;
+
+  /**
    * Foreign key to MediaQuestion
    * Contains audio files, images, scripts for this question
    * This separation keeps the Question table lean and allows
    * flexible media handling
    */
-  @Column({ type: 'int' })
+  @Column({ type: 'int', nullable: true })
   MediaQuestionID: number;
+
+  /**
+   * Explanation for the correct answer
+   * Helps students understand why the correct answer is right
+   * Can be a detailed explanation with HTML formatting
+   * Shown to students after they submit their answer or review the test
+   */
+  @Column({ type: 'longtext', nullable: true })
+  Explain: string;
+
+  /**
+   * Time code for when this question should be shown
+   * Useful for:
+   * - Listening parts where questions appear after specific audio timestamps
+   * - Time-based question presentations
+   * - Tracking question display timing in multimedia tests
+   * Format: HH:MM:SS
+   */
+  @Column({ type: 'time', nullable: true })
+  ShowTime: string;
+
+  /**
+   * Order/position of question within its group
+   * Used when multiple questions are grouped together
+   * (e.g., questions 1-3 all based on same audio)
+   * Default is 1 (first question)
+   */
+  @Column({ type: 'int', default: 1 })
+  OrderInGroup: number;
 
   /**
    * Relationship to MediaQuestion
@@ -58,13 +106,25 @@ export class Question {
    */
   @ManyToOne(() => MediaQuestion, (media) => media.questions, {
     eager: true, // Auto-load media when fetching questions
+    nullable: true,
   })
   @JoinColumn({ name: 'MediaQuestionID' })
   mediaQuestion: MediaQuestion;
 
   /**
+   * Relationship to Exam (optional direct reference)
+   * ManyToOne if question is specific to one exam
+   */
+  @ManyToOne(() => Exam, {
+    eager: false,
+    nullable: true,
+  })
+  @JoinColumn({ name: 'ExamID' })
+  exam: Exam;
+
+  /**
    * Relationship to ExamQuestion junction table
-   * This allows the question to appear in multiple exams
+   * This allows the question to appear in multiple exams (many-to-many)
    */
   @OneToMany(() => ExamQuestion, (examQuestion) => examQuestion.question)
   examQuestions: ExamQuestion[];
@@ -86,8 +146,4 @@ export class Question {
    */
   @OneToMany(() => AttemptAnswer, (attemptAnswer) => attemptAnswer.question)
   attemptAnswers: AttemptAnswer[];
-
-  // Thêm vào Question entity
-  @Column({ type: 'int', default: 1 })
-  OrderInGroup: number; // Thứ tự câu hỏi trong nhóm (1, 2, 3...)
 }

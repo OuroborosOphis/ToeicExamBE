@@ -418,6 +418,8 @@ export class AttemptService {
         },
 
         IsCorrect: aa.IsCorrect,
+        
+        Explain: aa.question.Explain, // Add explanation here
 
         Media: {
           AudioUrl: aa.question.mediaQuestion.AudioUrl,

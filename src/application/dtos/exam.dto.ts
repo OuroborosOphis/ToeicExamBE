@@ -265,7 +265,8 @@ export class ExamResultResponseDto {
  * - What the student answered
  * - What the correct answer is
  * - Whether they got it right
- * - Explanation (if available)
+ * - Explanation of why the correct answer is right
+ * - Media assets
  */
 export class DetailedAnswerDto {
   QuestionID: number;
@@ -286,6 +287,8 @@ export class DetailedAnswerDto {
   };
   
   IsCorrect: boolean;
+  
+  Explain?: string; // Explanation of why the correct answer is right
   
   Media?: {
     AudioUrl?: string;

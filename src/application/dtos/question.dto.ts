@@ -106,6 +106,20 @@ export class CreateQuestionDto {
   @Type(() => MediaQuestionDto)
   Media: MediaQuestionDto;
 
+  @IsString()
+  @IsOptional()
+  @IsNotEmpty({ message: 'Explain cannot be empty if provided' })
+  Explain?: string;
+
+  @IsString()
+  @IsOptional()
+  ShowTime?: string; // Format: HH:MM:SS
+
+  @IsInt()
+  @IsOptional()
+  @Type(() => Number)
+  OrderInGroup?: number = 1;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ChoiceDto)
@@ -136,6 +150,18 @@ export class UpdateQuestionDto {
   @Type(() => MediaQuestionDto)
   @IsOptional()
   Media?: MediaQuestionDto;
+
+  @IsString()
+  @IsOptional()
+  Explain?: string;
+
+  @IsString()
+  @IsOptional()
+  ShowTime?: string; // Format: HH:MM:SS
+
+  @IsInt()
+  @IsOptional()
+  OrderInGroup?: number;
 
   @IsArray()
   @ValidateNested({ each: true })
@@ -190,18 +216,22 @@ export class QuestionFilterDto {
 /**
  * Response DTO for question list (for admin/teacher)
  * 
- * This includes the correct answer information because it's for
+ * This includes the correct answer information and explanations because it's for
  * content management, not for students taking tests.
  * 
  * Includes:
- * - Full question details
+ * - Full question details with explanation of correct answer
  * - All choices with correct answer marked
  * - Media information
+ * - Timing information (ShowTime, OrderInGroup)
  * - Usage statistics (how many exams use this question)
  */
 export class QuestionListResponseDto {
   ID: number;
   QuestionText: string;
+  Explain?: string; // Explanation of the correct answer
+  ShowTime?: string; // Time code for when question should be shown (HH:MM:SS)
+  OrderInGroup: number; // Position in question group
   Media: {
     Skill: string;
     Type: string;
