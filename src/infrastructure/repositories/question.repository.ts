@@ -206,7 +206,7 @@ export class QuestionRepository {
    * @param choicesData - Updated choices data (with optional IDs)
    * @returns Updated question with all relations
    */
-  async update(
+    async update(
     id: number,
     questionData?: Partial<Question>,
     mediaData?: Partial<MediaQuestion>,
@@ -244,6 +244,11 @@ export class QuestionRepository {
           if (choicePayload.ID) {
             // Update existing choice
             payloadIds.add(choicePayload.ID);
+            
+            // Check if IsCorrect flag changed
+            const oldChoice = existingChoiceMap.get(choicePayload.ID);
+            const isCorrectChanged = oldChoice && oldChoice.IsCorrect !== choicePayload.IsCorrect;
+            
             await manager.update(
               Choice,
               choicePayload.ID,
@@ -253,6 +258,25 @@ export class QuestionRepository {
                 IsCorrect: choicePayload.IsCorrect,
               }
             );
+
+            // ✅ CẬP NHẬT ATTEMPTANSWER NẾU ISCORRECT THAY ĐỔI
+            if (isCorrectChanged) {
+              console.log(
+                `⚠️ IsCorrect changed for Choice ${choicePayload.ID}. ` +
+                `Updating corresponding AttemptAnswers...`
+              );
+              
+              // Cập nhật tất cả AttemptAnswer sử dụng choice này
+              await manager.update(
+                'AttemptAnswer' as any,
+                { ChoiceID: choicePayload.ID },
+                { IsCorrect: choicePayload.IsCorrect }
+              );
+              
+              console.log(
+                `✅ Updated IsCorrect in AttemptAnswer for Choice ${choicePayload.ID}`
+              );
+            }
           } else {
             // Create new choice (no ID provided)
             const newChoice = manager.create(Choice, {
@@ -292,6 +316,57 @@ export class QuestionRepository {
         where: { ID: id },
         relations: ['mediaQuestion', 'choices'],
       }) as Question;
+    });
+  }
+
+    /**
+   * Recalculate scores for all attempts using this question
+   * 
+   * When question's correct answer changes, old scores might be wrong.
+   * This method recalculates attempt scores based on new correct answers.
+   * 
+   * @param questionId - Question ID that was modified
+   */
+  async recalculateAttemptScores(questionId: number): Promise<void> {
+    return await AppDataSource.transaction(async (manager) => {
+      // Find all attempts that used this question
+      const affectedAttempts = await manager.query(`
+        SELECT DISTINCT a.ID
+        FROM attempt a
+        INNER JOIN attemptanswer aa ON a.ID = aa.AttemptID
+        WHERE aa.QuestionID = ?
+      `, [questionId]);
+
+      console.log(
+        `⚠️ Found ${affectedAttempts.length} attempts that need score recalculation`
+      );
+
+      // For each affected attempt, recalculate total score
+      for (const { ID: attemptId } of affectedAttempts) {
+        // Count correct answers
+        const result = await manager.query(`
+          SELECT 
+            SUM(CASE WHEN IsCorrect = 1 THEN 1 ELSE 0 END) as correctCount,
+            COUNT(*) as totalCount
+          FROM attemptanswer
+          WHERE AttemptID = ?
+        `, [attemptId]);
+
+        const correctCount = result[0]?.correctCount || 0;
+        const totalCount = result[0]?.totalCount || 1;
+        const scorePercent = Math.round((correctCount / totalCount) * 100);
+
+        // Update attempt score
+        await manager.update(
+          'Attempt' as any,
+          attemptId,
+          { ScorePercent: scorePercent }
+        );
+
+        console.log(
+          `✅ Updated Attempt ${attemptId}: ${correctCount}/${totalCount} (${scorePercent}%)`
+        );
+      }
     });
   }
 

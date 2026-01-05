@@ -261,6 +261,18 @@ export class QuestionService {
       throw new Error('Failed to update question');
     }
 
+    // ✅ TÙYCHỌN: Recalculate scores if choices were updated
+    if (updateData.Choices && updateData.Choices.length > 0) {
+      try {
+        await this.questionRepository.recalculateAttemptScores(questionId);
+      } catch (error) {
+        console.warn(
+          `Warning: Could not recalculate attempt scores: ${(error as Error).message}`
+        );
+        // Don't throw - question was updated successfully
+      }
+    }
+
     return updatedQuestion;
   }
 
