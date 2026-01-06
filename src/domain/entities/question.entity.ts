@@ -34,9 +34,9 @@ export class Question {
    * The question text/stem that students see
    * For Listening: might be empty if question is audio-only
    * For Reading: contains the actual question text
-   * Max 255 chars - longer content should be in MediaQuestion
+   * Max 1000 chars - longer content should be in MediaQuestion
    */
-  @Column({ type: 'varchar', length: 255, nullable: true })
+  @Column({ type: 'varchar', length: 1000, nullable: true })
   QuestionText: string;
 
   /**
