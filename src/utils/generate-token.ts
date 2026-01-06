@@ -134,13 +134,13 @@ function generateTeacherToken(): string {
  * Cần studentProfileId để link với student-specific data
  * (attempts, progress, comments, etc.)
  */
-function generateStudentToken(studentId: number = 14): string {
+function generateStudentToken(studentId: number = 13): string {
   const payload: TokenPayload = {
-    userId: 43,
+    userId: 44,
     // userId: studentId + 2, // userIds start from 3 for students
     email: `student${studentId}@toeic-practice.com`,
     role: 'STUDENT',
-    studentProfileId: 14,
+    studentProfileId: 13,
   };
 
   return generateToken(payload);

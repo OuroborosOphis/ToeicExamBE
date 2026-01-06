@@ -299,7 +299,8 @@ export class QuestionRepository {
             if (referenceCount === 0) {
               // Safe to delete - not referenced
               await manager.delete(Choice, choiceId);
-              console.log(`Deleted unreferenced choice ${choiceId}`);
+              console.log(`Deleted unreferenced choice ${
+                choiceId}`);
             } else {
               // Keep the choice - it's referenced by attempt answers
               console.warn(
@@ -325,13 +326,34 @@ export class QuestionRepository {
    * When question's correct answer changes, old scores might be wrong.
    * This method recalculates attempt scores based on new correct answers.
    * 
+   * Scoring logic depends on attempt type:
+   * - FULL_TEST: Use TOEIC conversion tables (0-495 per section)
+   * - PRACTICE_BY_PART: Use percentage-based scoring (0-100%)
+   * 
    * @param questionId - Question ID that was modified
    */
   async recalculateAttemptScores(questionId: number): Promise<void> {
+    // Import TOEIC conversion functions
+    const { convertListeningScore, convertReadingScore } = await import('../../utils/toeic-score-conversion');
+
     return await AppDataSource.transaction(async (manager) => {
+      // Find the question to get its skill type (LISTENING or READING)
+      const question = await manager.findOne(Question, {
+        where: { ID: questionId },
+        relations: ['mediaQuestion'],
+      });
+
+      if (!question) {
+        console.warn(`❌ Question ${questionId} not found for score recalculation`);
+        return;
+      }
+
+      const skill = question.mediaQuestion?.Skill; // LISTENING or READING
+      console.log(`📊 Recalculating scores for ${skill} question ${questionId}`);
+
       // Find all attempts that used this question
       const affectedAttempts = await manager.query(`
-        SELECT DISTINCT a.ID
+        SELECT DISTINCT a.ID, a.Type, a.ExamID
         FROM attempt a
         INNER JOIN attemptanswer aa ON a.ID = aa.AttemptID
         WHERE aa.QuestionID = ?
@@ -341,10 +363,10 @@ export class QuestionRepository {
         `⚠️ Found ${affectedAttempts.length} attempts that need score recalculation`
       );
 
-      // For each affected attempt, recalculate total score
-      for (const { ID: attemptId } of affectedAttempts) {
-        // Count correct answers
-        const result = await manager.query(`
+      // For each affected attempt, recalculate scores based on attempt type
+      for (const { ID: attemptId, Type: attemptType, ExamID } of affectedAttempts) {
+        // Calculate overall correct/total
+        const overallResult = await manager.query(`
           SELECT 
             SUM(CASE WHEN IsCorrect = 1 THEN 1 ELSE 0 END) as correctCount,
             COUNT(*) as totalCount
@@ -352,19 +374,90 @@ export class QuestionRepository {
           WHERE AttemptID = ?
         `, [attemptId]);
 
-        const correctCount = result[0]?.correctCount || 0;
-        const totalCount = result[0]?.totalCount || 1;
-        const scorePercent = Math.round((correctCount / totalCount) * 100);
+        const overallCorrectCount = overallResult[0]?.correctCount || 0;
+        const overallTotalCount = overallResult[0]?.totalCount || 1;
+        const scorePercent = Math.round((overallCorrectCount / overallTotalCount) * 100);
 
-        // Update attempt score
+        // Calculate Listening section score
+        const listeningResult = await manager.query(`
+          SELECT 
+            SUM(CASE WHEN aa.IsCorrect = 1 THEN 1 ELSE 0 END) as correctCount,
+            COUNT(*) as totalCount
+          FROM attemptanswer aa
+          INNER JOIN question q ON aa.QuestionID = q.ID
+          INNER JOIN mediaquestion mq ON q.MediaQuestionID = mq.ID
+          WHERE aa.AttemptID = ? AND mq.Skill = 'LISTENING'
+        `, [attemptId]);
+
+        const listeningCorrectCount = listeningResult[0]?.correctCount || 0;
+        const listeningTotalCount = listeningResult[0]?.totalCount || 0;
+
+        // Calculate Reading section score
+        const readingResult = await manager.query(`
+          SELECT 
+            SUM(CASE WHEN aa.IsCorrect = 1 THEN 1 ELSE 0 END) as correctCount,
+            COUNT(*) as totalCount
+          FROM attemptanswer aa
+          INNER JOIN question q ON aa.QuestionID = q.ID
+          INNER JOIN mediaquestion mq ON q.MediaQuestionID = mq.ID
+          WHERE aa.AttemptID = ? AND mq.Skill = 'READING'
+        `, [attemptId]);
+
+        const readingCorrectCount = readingResult[0]?.correctCount || 0;
+        const readingTotalCount = readingResult[0]?.totalCount || 0;
+
+        let scoreListening: number;
+        let scoreReading: number;
+
+        // ✅ LOGIC PHÂN BIỆT FULL_TEST vs PRACTICE_BY_PART
+        if (attemptType === 'FULL_TEST') {
+          // FULL_TEST: Sử dụng TOEIC conversion table (0-495)
+          scoreListening = convertListeningScore(listeningCorrectCount);
+          scoreReading = convertReadingScore(readingCorrectCount);
+          
+          console.log(
+            `📘 FULL_TEST Scoring:\n` +
+            `   Listening: ${listeningCorrectCount}/100 → ${scoreListening} (TOEIC scale)\n` +
+            `   Reading: ${readingCorrectCount}/100 → ${scoreReading} (TOEIC scale)`
+          );
+        } else {
+          // PRACTICE_BY_PART: Sử dụng percentage-based scoring
+          // Tính theo % và scale về 0-495 để consistency với UI
+          const listeningPercent = listeningTotalCount > 0 
+            ? (listeningCorrectCount / listeningTotalCount) 
+            : 0;
+          const readingPercent = readingTotalCount > 0 
+            ? (readingCorrectCount / readingTotalCount) 
+            : 0;
+          
+          // Scale percentage to 0-495 range for display consistency
+          scoreListening = Math.round(listeningPercent * 495);
+          scoreReading = Math.round(readingPercent * 495);
+          
+          console.log(
+            `📗 PRACTICE_BY_PART Scoring:\n` +
+            `   Listening: ${listeningCorrectCount}/${listeningTotalCount} (${Math.round(listeningPercent * 100)}%) → ${scoreListening}\n` +
+            `   Reading: ${readingCorrectCount}/${readingTotalCount} (${Math.round(readingPercent * 100)}%) → ${scoreReading}`
+          );
+        }
+
+        // Update attempt with recalculated scores
         await manager.update(
           'Attempt' as any,
           attemptId,
-          { ScorePercent: scorePercent }
+          { 
+            ScorePercent: scorePercent,
+            ScoreListening: scoreListening,
+            ScoreReading: scoreReading,
+          }
         );
 
         console.log(
-          `✅ Updated Attempt ${attemptId}: ${correctCount}/${totalCount} (${scorePercent}%)`
+          `✅ Updated Attempt ${attemptId} (${attemptType}):\n` +
+          `   Overall: ${overallCorrectCount}/${overallTotalCount} (${scorePercent}%)\n` +
+          `   ScoreListening: ${scoreListening}\n` +
+          `   ScoreReading: ${scoreReading}\n` +
+          `   Total TOEIC: ${scoreListening + scoreReading}`
         );
       }
     });
